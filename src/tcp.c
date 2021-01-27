@@ -38,10 +38,6 @@
 
 #include "tcp.h"
 
-#ifndef CONFIG_DIR
-#define CONFIG_DIR	"/etc"
-#endif
-
 static const char *SSL_CIPHER_LIST = "ALL:!LOW";
 
 #ifdef _WIN32
@@ -66,40 +62,16 @@ static int winsock_init(void)
 }
 #endif
 
-#define PUB_EXP 65537
-
-static RSA *ssl_genkey(SSL *ssl_connection, int export, int key_length)
-{
-    RSA *key = NULL;
-    BIGNUM *bne = BN_new();
-    int ret = BN_set_word(bne, PUB_EXP);
-    if (ret == 1) {
-	key = RSA_new();
-	ret = RSA_generate_key_ex(key, export ? key_length : 1024, bne, NULL);
-	if (ret != 1) {
-	    RSA_free(key);
-	    key = NULL;
-	}
-	BN_free(bne);
-    }
-    return key;
-}
-
-SSL_CTX *ssl_initialize(void)
+static SSL_CTX *ssl_initialize(char *sslkeyfile, char *sslcertfile)
 {
     SSL_CTX *ssl_context;
-
-    static char cert_path[FILENAME_MAX + 1];
-
-    /* -1. check if certificate exists */
-    sprintf(cert_path, CONFIG_DIR "/server.pem");
 
     /* 0. initialize library */
     SSL_library_init();
     SSL_load_error_strings();
 
     /* 1. initialize context */
-    if ((ssl_context = SSL_CTX_new(TLS_method())) == NULL) {
+    if ((ssl_context = SSL_CTX_new(SSLv23_server_method())) == NULL) {
 	fprintf(stderr, "Failed to initialize SSL context.\n");
 	return NULL;
     }
@@ -111,19 +83,15 @@ SSL_CTX *ssl_initialize(void)
 	goto error1;
     }
 
-    /* 2. load certificates */
-    if (!SSL_CTX_use_certificate_chain_file(ssl_context, cert_path)) {
-	fprintf(stderr, "Failed to load certificate.\n");
+    if (SSL_CTX_use_PrivateKey_file(ssl_context, sslkeyfile, SSL_FILETYPE_PEM) <= 0) {
+	fprintf(stderr, "Failed to load private key file.\n");
 	goto error1;
     }
 
-    if (!SSL_CTX_use_RSAPrivateKey_file(ssl_context, cert_path, SSL_FILETYPE_PEM)) {
-	fprintf(stderr, "Failed to load private key.\n");
+    if (SSL_CTX_use_certificate_file(ssl_context, sslcertfile, SSL_FILETYPE_PEM) <= 0) {
+	fprintf(stderr, "Failed to load certificate key file.\n");
 	goto error1;
     }
-
-    if (SSL_CTX_need_tmp_RSA(ssl_context))
-	SSL_CTX_set_tmp_rsa_callback(ssl_context, ssl_genkey);
 
     return ssl_context;
  error1:
@@ -139,7 +107,7 @@ static SSL_CTX *ssl_client_initialize(void)
     SSL_load_error_strings();
     OpenSSL_add_all_algorithms();
     static const SSL_METHOD *meth;
-    meth = TLS_client_method();
+    meth = SSLv23_client_method();
     ctx = SSL_CTX_new(meth);
 
     if (!ctx) {
@@ -151,14 +119,15 @@ static SSL_CTX *ssl_client_initialize(void)
 
 static void ssl_tear_down(SSL_CTX *ctx)
 {
-	SSL_CTX_free(ctx);
+    SSL_CTX_free(ctx);
 }
 
-tcp_channel *tcp_open(int mode, const char *addr, int port)
+tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, char *sslcertfile)
 {
 #ifdef _WIN32
-    if (winsock_init())
+    if (winsock_init()) {
 	return NULL;
+    }
 #endif
 
     tcp_channel *u = (tcp_channel *)malloc(sizeof(tcp_channel));
@@ -202,7 +171,7 @@ tcp_channel *tcp_open(int mode, const char *addr, int port)
 	}
 	
 	if (mode == TCP_SSL_SERVER) {
-	    u->ctx = ssl_initialize();
+	    u->ctx = ssl_initialize(sslkeyfile, sslcertfile);
 	}
     } else {
 	struct hostent *server = gethostbyname(addr);
@@ -249,8 +218,9 @@ int tcp_close(tcp_channel *u)
 		SSL_shutdown(u->ssl);
 		SSL_free(u->ssl);
 	    }
-	    if (u->ctx)
+	    if (u->ctx) {
 		ssl_tear_down(u->ctx);
+	    }
 	}
 	closesocket(u->s);
     }
@@ -271,10 +241,11 @@ tcp_channel *tcp_accept(tcp_channel *u)
     tcp_channel *n = (tcp_channel *)malloc(sizeof(tcp_channel));
     memset(n, 0, sizeof(tcp_channel));
 
-    if (u->mode == TCP_SSL_SERVER)
+    if (u->mode == TCP_SSL_SERVER) {
 	n->mode = TCP_SSL_CLIENT;
-    else
+    } else {
 	n->mode = TCP_CLIENT;
+    }
 
     socklen_t l = sizeof(struct sockaddr);
     if ((n->s = accept(u->s, (struct sockaddr *)&n->my_addr, &l)) < 0) {
@@ -309,11 +280,13 @@ int tcp_read(tcp_channel *u, char *buf, size_t len)
     int r;
 
     if ((u->mode == TCP_SSL_CLIENT) || (u->mode == TCP_SSL_SERVER)) {
-	if ((r = SSL_read(u->ssl, buf, len)) < 0)
+	if ((r = SSL_read(u->ssl, buf, len)) < 0) {
 	    fprintf(stderr, "SSL_read()\n");
+	}
     } else {
-	if ((r = recv(u->s, buf, len, 0)) == -1)
+	if ((r = recv(u->s, buf, len, 0)) == -1) {
 	    fprintf(stderr, "recvfrom()\n");
+	}
     }
 
     return r;
@@ -323,11 +296,13 @@ int tcp_write(tcp_channel *u, char *buf, size_t len)
 {
     int r;
     if ((u->mode == TCP_SSL_CLIENT) || (u->mode == TCP_SSL_SERVER)) {
-	if ((r = SSL_write(u->ssl, buf, len)) < 0)
+	if ((r = SSL_write(u->ssl, buf, len)) < 0) {
 	    fprintf(stderr, "SSL_write()\n");
+	}
     } else {
-	if ((r = send(u->s, buf, len, 0)) < 0)
+	if ((r = send(u->s, buf, len, 0)) < 0) {
 	    fprintf(stderr, "sendto()\n");
+	}
     }
 
     return r;

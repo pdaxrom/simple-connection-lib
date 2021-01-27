@@ -124,12 +124,15 @@ int udp_close(udp_channel *u)
 	    u->forward = tmp;
 	}
     }
-    if (u->inp_addr)
+    if (u->inp_addr) {
 	free(u->inp_addr);
-    if (u->out_addr)
+    }
+    if (u->out_addr) {
 	free(u->out_addr);
-    if (u->s >=0)
+    }
+    if (u->s >=0) {
 	closesocket(u->s);
+    }
     free(u);
 /*
 #ifdef _WIN32
@@ -148,20 +151,22 @@ int udp_read(udp_channel *u, uint8_t *buf, size_t len)
     socklen_t slen = sizeof(u->my_addr);
 
     if (u->mode == UDP_SERVER) {
-        if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)u->inp_addr, &slen)) == -1)
+        if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)u->inp_addr, &slen)) == -1) {
     	    fprintf(stderr, "recvfrom()\n");
 #ifdef DEBUG
-    	else
+    	} else {
     	    fprintf(stderr, "Received packet from %s:%d size %d\n", inet_ntoa(u->inp_addr->sin_addr), ntohs(u->inp_addr->sin_port), r);
 #endif
+	}
 	*u->out_addr = *u->inp_addr;
     } else {
-        if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, &slen))==-1)
+        if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, &slen))==-1) {
 	    fprintf(stderr, "recvfrom()\n");
 #ifdef DEBUG
-        else
+        } else {
 	    fprintf(stderr, "Received packet from %s:%d size %d\n", inet_ntoa(u->my_addr.sin_addr), ntohs(u->my_addr.sin_port), r);
 #endif
+	}
     }
 
     return r;
@@ -173,11 +178,13 @@ int udp_write(udp_channel *u, uint8_t *buf, size_t len)
     socklen_t slen = sizeof(u->my_addr);
 
     if (u->mode == UDP_SERVER) {
-	if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)u->out_addr, slen)) < 0)
+	if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)u->out_addr, slen)) < 0) {
 	    fprintf(stderr, "sendto()\n");
+	}
     } else {
-	if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, slen)) == -1)
+	if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, slen)) == -1) {
 	    fprintf(stderr, "sendto()\n");
+	}
     }
 
     return r;
@@ -193,19 +200,21 @@ int udp_read_src(udp_channel *u, uint8_t *buf, size_t len)
     socklen_t slen = sizeof(u->my_addr);
 
     if (u->mode == UDP_SERVER) {
-        if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)u->inp_addr, &slen)) == -1)
+        if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)u->inp_addr, &slen)) == -1) {
     	    fprintf(stderr, "recvfrom()\n");
 #ifdef DEBUG
-    	else
+    	} else {
     	    fprintf(stderr, "Received packet from %s:%d size %d\n", inet_ntoa(u->inp_addr->sin_addr), ntohs(u->inp_addr->sin_port), r);
 #endif
+	}
     } else {
-        if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, &slen))==-1)
+        if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, &slen))==-1) {
 	    fprintf(stderr, "recvfrom()\n");
 #ifdef DEBUG
-        else
+        } else {
 	    fprintf(stderr, "Received packet from %s:%d size %d\n", inet_ntoa(u->my_addr.sin_addr), ntohs(u->my_addr.sin_port), r);
 #endif
+	}
     }
 
     return r;
@@ -213,14 +222,16 @@ int udp_read_src(udp_channel *u, uint8_t *buf, size_t len)
 
 void udp_commit_dst(udp_channel *u)
 {
-    if (u->mode == UDP_SERVER)
+    if (u->mode == UDP_SERVER) {
 	*u->out_addr = *u->inp_addr;
+    }
 }
 
 int udp_forward_add(udp_channel *u, char *label)
 {
-    if (u->mode != UDP_SERVER)
+    if (u->mode != UDP_SERVER) {
 	return 0;
+    }
 
     udp_forward *fwd = u->forward;
     udp_forward *prev = NULL;
@@ -234,18 +245,20 @@ int udp_forward_add(udp_channel *u, char *label)
     }
 
     fwd = (udp_forward *) malloc(sizeof(udp_forward));
-    if (!fwd)
+    if (!fwd) {
 	return -1;
+    }
     fwd->addr = *u->inp_addr;
     fwd->label = strdup(label);
     fwd->used = 1;
     fwd->total = 0;
     fwd->next = NULL;
 
-    if (prev)
+    if (prev) {
 	prev->next = fwd;
-    else
+    } else {
 	u->forward = fwd;
+    }
 
 #ifdef DEBUG
     fprintf(stderr, "Added forward for %s\n", fwd->label);
@@ -256,8 +269,9 @@ int udp_forward_add(udp_channel *u, char *label)
 
 int udp_forward_write(udp_channel *u, char *label, uint8_t *buf, size_t len)
 {
-    if (u->mode != UDP_SERVER)
+    if (u->mode != UDP_SERVER) {
 	return 0;
+    }
 
     udp_forward *fwd = u->forward;
     while(fwd) {
@@ -267,8 +281,9 @@ int udp_forward_write(udp_channel *u, char *label, uint8_t *buf, size_t len)
 #ifdef DEBUG
 	    fprintf(stderr, "Forward to %s\n", fwd->label);
 #endif
-	    if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)&fwd->addr, slen)) < 0)
+	    if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)&fwd->addr, slen)) < 0) {
 		fprintf(stderr, "sendto()\n");
+	    }
 
 	    fwd->total += len;
 
@@ -285,8 +300,9 @@ int udp_forward_write(udp_channel *u, char *label, uint8_t *buf, size_t len)
 void udp_forward_show(udp_channel *u)
 {
     udp_forward *fwd = u->forward;
-    if (!fwd)
+    if (!fwd) {
 	return;
+    }
     fprintf(stderr, "-- UDP forward table --\n");
     while (fwd) {
 	fprintf(stderr, "%s %s:%d %d\n", fwd->label, inet_ntoa(fwd->addr.sin_addr), ntohs(fwd->addr.sin_port), fwd->total);
@@ -299,20 +315,23 @@ void udp_forward_remove_inactive(udp_channel *u)
 {
     udp_forward *fwd = u->forward;
     udp_forward *prev = NULL;
-    if (!fwd)
+    if (!fwd) {
 	return;
+    }
     while (fwd) {
 	if (!fwd->used) {
-	    if (prev)
+	    if (prev) {
 		prev->next = fwd->next;
-	    else
+	    } else {
 		u->forward = fwd->next;
+	    }
 	    free(fwd->label);
 	    free(fwd);
-	    if (prev)
+	    if (prev) {
 		fwd = prev->next;
-	    else
+	    } else {
 		fwd = u->forward;
+	    }
 	    continue;
 	}
 	fwd->used = 0;

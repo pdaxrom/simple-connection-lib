@@ -257,6 +257,7 @@ tcp_channel *tcp_accept(tcp_channel *u)
     if (u->mode == TCP_SSL_SERVER) {
 	if ((n->ssl = SSL_new(u->ctx)) == NULL) {
 	    fprintf(stderr, "Failed to create SSL connection.\n");
+	    closesocket(n->s);
 	    free(n);
 	    return NULL;
 	}
@@ -267,6 +268,7 @@ tcp_channel *tcp_accept(tcp_channel *u)
 	    fprintf(stderr, "Unable to accept SSL connection.\n");
 	    ERR_print_errors_fp(stderr);
 	    SSL_free(n->ssl);
+	    closesocket(n->s);
 	    free(n);
 	    return NULL;
 	}

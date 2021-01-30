@@ -30,10 +30,18 @@ typedef struct _tcp_channel {
 
 #define tcp_fd(u) (u->s)
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, char *sslcertfile);
 tcp_channel *tcp_accept(tcp_channel *u);
 int tcp_read(tcp_channel *u, char *buf, size_t len);
 int tcp_write(tcp_channel *u, char *buf, size_t len);
 int tcp_close(tcp_channel *u);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -35,6 +35,10 @@ typedef struct _udp_channel {
 
 #define udp_fd(u) (u->s)
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 udp_channel *udp_open(int mode, char *addr, int port);
 int udp_read(udp_channel *u, uint8_t *buf, size_t len);
 int udp_write(udp_channel *u, uint8_t *buf, size_t len);
@@ -47,5 +51,9 @@ int udp_forward_add(udp_channel *u, char *label);
 int udp_forward_write(udp_channel *u, char *label, uint8_t *buf, size_t len);
 void udp_forward_show(udp_channel *u);
 void udp_forward_remove_inactive(udp_channel *u);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

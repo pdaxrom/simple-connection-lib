@@ -9,7 +9,7 @@
 #include <sys/select.h>
 #endif
 
-#include "tcp.h"
+#include "../src/tcp.h"
 
 #define BUF_SIZE	256
 

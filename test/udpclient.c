@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "udp.h"
+#include "../src/udp.h"
 
 #define BUF_SIZE	256
 

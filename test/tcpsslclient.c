@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "tcp.h"
+#include "../src/tcp.h"
 
 #define BUF_SIZE	256
 

@@ -1,5 +1,5 @@
-AM_CFLAGS = -I../src $(OPENSSL_CFLAGS)
-LIBS = $(OPENSSL_LIBS) ../src/libsimple_connection.la
+AM_CFLAGS = $(OPENSSL_STATIC_CFLAGS) -I../src
+LIBS = ../src/libsimple_connection.la $(OPENSSL_STATIC_LIBS)
 
 noinst_PROGRAMS = tcpclient tcpserver tcpsslclient tcpsslserver udpchat udpclient udpserver
 

@@ -10,6 +10,7 @@
 #else
 #include <windows.h>
 #endif
+#include <inttypes.h>
 
 enum {
     UDP_SERVER = 0,

@@ -33,8 +33,6 @@
 #include <windows.h>
 #endif
 
-#include <inttypes.h>
-
 #define PORT 9930
 
 #include "udp.h"

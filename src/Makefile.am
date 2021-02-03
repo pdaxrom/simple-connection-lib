@@ -1,5 +1,5 @@
-AM_CFLAGS = $(OPENSSL_CFLAGS)
-LIBS = $(OPENSSL_LIBS)
+AM_CFLAGS = $(SIMPLE_CONNECTION_CFLAGS)
+LIBS = $(SIMPLE_CONNECTION_LIBS)
 
 lib_LTLIBRARIES = libsimple_connection.la 
 libsimple_connection_la_SOURCES = tcp.c tcp.h udp.c udp.h

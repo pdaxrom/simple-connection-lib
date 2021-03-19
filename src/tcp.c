@@ -38,6 +38,106 @@
 
 #include "tcp.h"
 
+#if defined(__APPLE__)
+
+#include <libkern/OSByteOrder.h>
+#define WS_NTOH64(n) OSSwapBigToHostInt64(n)
+#define WS_NTOH32(n) OSSwapBigToHostInt32(n)
+#define WS_NTOH16(n) OSSwapBigToHostInt16(n)
+#define WS_HTON64(n) OSSwapHostToBigInt64(n)
+#define WS_HTON16(n) OSSwapHostToBigInt16(n)
+
+#else
+
+#if defined(_WIN32)
+
+#include <windows.h>
+
+#define htobe16(x) __builtin_bswap16(x)
+#define htole16(x) (x)
+#define be16toh(x) __builtin_bswap16(x)
+#define le16toh(x) (x)
+
+#define htobe32(x) __builtin_bswap32(x)
+#define htole32(x) (x)
+#define be32toh(x) __builtin_bswap32(x)
+#define le32toh(x) (x)
+
+#define htobe64(x) __builtin_bswap64(x)
+#define htole64(x) (x)
+#define be64toh(x) __builtin_bswap64(x)
+#define le64toh(x) (x)
+
+#endif
+
+#define WS_NTOH64(n) htobe64(n)
+#define WS_NTOH32(n) htobe32(n)
+#define WS_NTOH16(n) htobe16(n)
+#define WS_HTON64(n) htobe64(n)
+#define WS_HTON16(n) htobe16(n)
+
+#endif
+
+enum
+{
+    WS_OPCODE_CONTINUATION = 0x00,
+    WS_OPCODE_TEXT_FRAME = 0x01,
+    WS_OPCODE_BINARY_FRAME = 0x02,
+    WS_OPCODE_CLOSE = 0x08,
+    WS_OPCODE_PING = 0x09,
+    WS_OPCODE_PONG = 0x0A,
+    WS_OPCODE_INVALID = 0xFF
+};
+
+typedef union ws_mask_s {
+  char c[4];
+  uint32_t u;
+} ws_mask_t;
+
+/* XXX: The union and the structs do not need to be named.
+ *      We are working around a bug present in GCC < 4.6 which prevented
+ *      it from recognizing anonymous structs and unions.
+ *      See http://gcc.gnu.org/bugzilla/show_bug.cgi?id=4784
+ */
+#if _WIN32
+#pragma pack(push, 1)
+#endif
+typedef struct
+#if __GNUC__
+__attribute__ ((__packed__)) 
+#endif
+ws_header_s {
+  unsigned char b0;
+  unsigned char b1;
+  union {
+    struct 
+#if __GNUC__
+    __attribute__ ((__packed__)) 
+#endif
+           {
+      uint16_t l16;
+      ws_mask_t m16;
+    } s16;
+    struct
+#if __GNUC__
+__attribute__ ((__packed__)) 
+#endif
+           {
+      uint64_t l64;
+      ws_mask_t m64;
+    } s64;
+    ws_mask_t m;
+  } u;
+} ws_header_t;
+#if _WIN32
+#pragma pack(pop)
+#endif
+
+typedef struct ws_s {
+    ws_header_t header;
+    int avail;
+} ws_t;
+
 static const char *SSL_CIPHER_LIST = "ALL:!LOW";
 
 #ifdef _WIN32
@@ -275,6 +375,16 @@ tcp_channel *tcp_accept(tcp_channel *u)
     }
 
     return n;
+}
+
+int tcp_connection_method(tcp_channel *u, int connection_method)
+{
+    u->connection_method = connection_method;
+    if (connection_method == SIMPLE_CONNECTION_METHOD_WS) {
+	u->ws = malloc(sizeof(ws_t));
+    }
+
+    return 1;
 }
 
 int tcp_read(tcp_channel *u, char *buf, size_t len)

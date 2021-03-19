@@ -296,9 +296,11 @@ tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, ch
 	if (mode == TCP_SSL_CLIENT) {
 	    u->ctx = ssl_client_initialize();
 	    u->ssl = SSL_new(u->ctx);
+	    SSL_set_tlsext_host_name(u->ssl, addr);
 	    SSL_set_fd(u->ssl, u->s);
-	    if (SSL_connect(u->ssl) < 0) {
-		fprintf(stderr, "SSL_connect()\n");
+	    int retval;
+	    if ((retval = SSL_connect(u->ssl)) < 0) {
+		fprintf(stderr, "SSL_connect(): %d\n", SSL_get_error(u->ssl, retval));
 		SSL_free(u->ssl);
 		ssl_tear_down(u->ctx);
 		free(u);

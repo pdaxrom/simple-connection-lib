@@ -540,7 +540,7 @@ static int http_ws_method_server(tcp_channel *channel)
 	return 0;
     }
 
-    if (strcasecmp(field, "Upgrade")) {
+    if (!strcasestr(field, "Upgrade")) {
 	fprintf(stderr, "wrong Connection [%s]\n", field);
 	return 0;
     }
@@ -744,9 +744,21 @@ static int recv_ws_header(tcp_channel *channel)
     }
 
     if (ws->header.b1 & 0x80) {
-	if (tcp_read_internal(channel, (char *)&ws->header.u.m.c, 4) != 4) {
-	    fprintf(stderr, "%s: mask - tcp_read()\n", __func__);
-	    return 0;
+	if ((ws->header.b1 & 0x7f) == 0x7e) {
+	    if (tcp_read_internal(channel, (char *)&ws->header.u.s16.m16.c, 4) != 4) {
+		fprintf(stderr, "%s: 0x7e mask - tcp_read()\n", __func__);
+		return 0;
+	    }
+	} else if ((ws->header.b1 & 0x7f) == 0x7f) {
+	    if (tcp_read_internal(channel, (char *)&ws->header.u.s64.m64.c, 4) != 4) {
+		fprintf(stderr, "%s: 0x7f mask - tcp_read()\n", __func__);
+		return 0;
+	    }
+	} else {
+	    if (tcp_read_internal(channel, (char *)&ws->header.u.m.c, 4) != 4) {
+		fprintf(stderr, "%s: mask - tcp_read()\n", __func__);
+		return 0;
+	    }
 	}
 	//fprintf(stderr, "ws mask %08X\n", channel->ws.header.u.m.u);
 	//fprintf(stderr, "ws mask?!\n");
@@ -828,9 +840,7 @@ int tcp_read(tcp_channel *u, char *buf, size_t len)
     if (ret > 0) {
 	if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
 	    ws->avail -= ret;
-	}
 
-	if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
 	    ws_mask_data(u->ws, tmp, ret);
 	}
 

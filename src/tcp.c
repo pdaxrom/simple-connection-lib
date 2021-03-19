@@ -36,6 +36,8 @@
 #define closesocket close
 #else
 #include <windows.h>
+#include <shlwapi.h>
+#define strcasestr StrStrIA
 #endif
 
 #define PORT 9930

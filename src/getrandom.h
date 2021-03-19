@@ -1,5 +1,5 @@
 /*
- *  TCP IO wrapper
+ *  Random function wrapper
  *
  *  Copyright (c) 2008-2021 Alexander Chukov <sashz@pdaXrom.org>
  *
@@ -22,60 +22,14 @@
  *  SOFTWARE.
  */
 
-#ifndef TCP_H
-#define TCP_H
-
-#ifndef _WIN32
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#else
-#include <windows.h>
-#endif
-#include <openssl/ssl.h>
-#include <openssl/err.h>
-
-enum {
-    TCP_SERVER = 0,
-    TCP_SSL_SERVER,
-    TCP_CLIENT,
-    TCP_SSL_CLIENT
-};
-
-enum {
-    SIMPLE_CONNECTION_METHOD_DIRECT = 0,
-    SIMPLE_CONNECTION_METHOD_CONNECT,
-    SIMPLE_CONNECTION_METHOD_WS
-};
-
-typedef struct _tcp_channel {
-    int s;
-    struct sockaddr_in my_addr;
-    int mode;
-    int primary_mode;
-    SSL *ssl;
-    SSL_CTX *ctx;
-    char *host;
-    char *path;
-    int connection_method;
-    /* ws socket mode */
-    void *ws;
-} tcp_channel;
-
-#define tcp_fd(u) (u->s)
+#ifndef __GETRANDOM_H__
+#define __GETRANDOM_H__
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, char *sslcertfile);
-tcp_channel *tcp_accept(tcp_channel *u);
-int tcp_connection_upgrade(tcp_channel *u, int connection_method, const char *path);
-int tcp_read(tcp_channel *u, char *buf, size_t len);
-int tcp_write(tcp_channel *u, char *buf, size_t len);
-int tcp_close(tcp_channel *u);
+int simple_connection_get_random(void *buf, size_t buflen, unsigned int flags);
 
 #ifdef __cplusplus
 }

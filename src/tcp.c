@@ -1,21 +1,25 @@
 /*
  *  TCP IO wrapper
  *
- *  Copyright (C) 2008-2013 Alexander Chukov <sash@pdaXrom.org>
+ *  Copyright (c) 2008-2021 Alexander Chukov <sashz@pdaXrom.org>
  *
- *  This program is free software; you can redistribute it and/or modify
- *  it under the terms of the GNU General Public License as published by
- *  the Free Software Foundation; either version 2 of the License, or
- *  (at your option) any later version.
+ *  Permission is hereby granted, free of charge, to any person obtaining a copy
+ *  of this software and associated documentation files (the "Software"), to deal
+ *  in the Software without restriction, including without limitation the rights
+ *  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ *  copies of the Software, and to permit persons to whom the Software is
+ *  furnished to do so, subject to the following conditions:
  *
- *  This program is distributed in the hope that it will be useful,
- *  but WITHOUT ANY WARRANTY; without even the implied warranty of
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *  GNU General Public License for more details.
+ *  The above copyright notice and this permission notice shall be included in all
+ *  copies or substantial portions of the Software.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ *  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ *  SOFTWARE.
  */
 
 #include <stdio.h>
@@ -37,6 +41,8 @@
 #define PORT 9930
 
 #include "tcp.h"
+#include "getrandom.h"
+#include "base64.h"
 
 #if defined(__APPLE__)
 
@@ -90,7 +96,7 @@ enum
 };
 
 typedef union ws_mask_s {
-  char c[4];
+  unsigned char c[4];
   uint32_t u;
 } ws_mask_t;
 
@@ -234,6 +240,7 @@ tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, ch
     memset(u, 0, sizeof(tcp_channel));
 
     u->mode = mode;
+    u->primary_mode = mode;
 
     if ((u->s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
 	fprintf(stderr, "socket() error!\n");
@@ -309,6 +316,8 @@ tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, ch
 	}
     }
 
+    u->host = (char *)addr;
+
     return u;
 }
 
@@ -326,6 +335,11 @@ int tcp_close(tcp_channel *u)
 	}
 	closesocket(u->s);
     }
+
+    if (u->ws) {
+	free(u->ws);
+    }
+
     free(u);
 /*
 #ifdef _WIN32
@@ -348,6 +362,8 @@ tcp_channel *tcp_accept(tcp_channel *u)
     } else {
 	n->mode = TCP_CLIENT;
     }
+
+    n->primary_mode = u->mode;
 
     socklen_t l = sizeof(struct sockaddr);
     if ((n->s = accept(u->s, (struct sockaddr *)&n->my_addr, &l)) < 0) {
@@ -379,17 +395,7 @@ tcp_channel *tcp_accept(tcp_channel *u)
     return n;
 }
 
-int tcp_connection_method(tcp_channel *u, int connection_method)
-{
-    u->connection_method = connection_method;
-    if (connection_method == SIMPLE_CONNECTION_METHOD_WS) {
-	u->ws = malloc(sizeof(ws_t));
-    }
-
-    return 1;
-}
-
-int tcp_read(tcp_channel *u, char *buf, size_t len)
+static int tcp_read_internal(tcp_channel *u, char *buf, size_t len)
 {
     int r;
 
@@ -406,7 +412,7 @@ int tcp_read(tcp_channel *u, char *buf, size_t len)
     return r;
 }
 
-int tcp_write(tcp_channel *u, char *buf, size_t len)
+static int tcp_write_internal(tcp_channel *u, char *buf, size_t len)
 {
     int r;
     if ((u->mode == TCP_SSL_CLIENT) || (u->mode == TCP_SSL_SERVER)) {
@@ -420,4 +426,414 @@ int tcp_write(tcp_channel *u, char *buf, size_t len)
     }
 
     return r;
+}
+
+static int get_http_header(tcp_channel *channel, char *head, int headLen)
+{
+    int nread;
+    int totalRead = 0;
+    char crlf[4] = { 0, 0, 0, 0 };
+
+    while (totalRead < headLen - 1) {
+	nread = tcp_read_internal(channel, &head[totalRead], 1);
+	if (nread <= 0) {
+//		fprintf(stderr, "%s: Cannot read response (%s)\n", __func__, strerror(errno));
+	    return -1;
+	}
+	crlf[0] = crlf[1];
+	crlf[1] = crlf[2];
+	crlf[2] = crlf[3];
+	crlf[3] = head[totalRead];
+
+	totalRead += nread;
+
+	if (crlf[0] == 13 && crlf[1] == 10 && crlf[2] == 13 && crlf[3] == 10) {
+	    break;
+	    }
+
+	if (crlf[2] == 10 && crlf[3] == 10) {
+	    break;
+	}
+    }
+
+    head[totalRead] = 0;
+
+    return totalRead;
+}
+
+static char *copy_string(char *dst, int dstSize, char *src, int srcSize)
+{
+    if (!dst) {
+	dstSize = srcSize;
+	dst = malloc(dstSize + 1);
+    } else {
+	dstSize = (srcSize > dstSize) ? dstSize : srcSize;
+    }
+    memcpy(dst, src, dstSize);
+    dst[dstSize] = 0;
+    return dst;
+}
+
+static char *header_get_field(char *header, char *field, char *str, int n)
+{
+    char *tmp = strcasestr(header, field);
+    if (tmp) {
+	char *tmp1 = strchr(tmp, ':');
+	if (tmp1) {
+	    for (tmp1++; *tmp1 == ' '; tmp1++) ;
+	    for (tmp = tmp1; *tmp != 0 && *tmp != '\n' && *tmp != '\r'; tmp++) ;
+	    return copy_string(str, n, tmp1, tmp - tmp1);
+	}
+    }
+    return NULL;
+}
+
+static char *header_get_path(char *header, char *str, int n)
+{
+    char *tmp = strchr(header, ' ');
+    if (tmp) {
+	char *tmp1 = strchr(tmp + 1, ' ');
+	if (tmp1) {
+	    return copy_string(str, n, tmp + 1, tmp1 - tmp - 1);
+	}
+    }
+    if (str) {
+	str[0] = 0;
+    }
+    return NULL;
+}
+
+static int http_ws_method_server(tcp_channel *channel)
+{
+    char req[1024];
+    char field[256];
+    unsigned char sha1buf[SHA_DIGEST_LENGTH];
+
+    if (get_http_header(channel, req, sizeof(req)) <= 0) {
+	fprintf(stderr, "%s: get_http_header()\n", __func__);
+	return 0;
+    }
+
+    //fprintf(stderr, "method ws get [%s]\n", req);
+
+    if (!header_get_path(req, field, sizeof(field))) {
+	return 0;
+    }
+
+    if (strcmp(field, channel->path)) {
+	fprintf(stderr, "wrong path [%s]\n", field);
+	return 0;
+    }
+
+    if (!header_get_field(req, "Upgrade", field, sizeof(field))) {
+	return 0;
+    }
+
+    if (strcasecmp(field, "websocket")) {
+	fprintf(stderr, "wrong Upgrade [%s]\n", field);
+	return 0;
+    }
+
+    if (!header_get_field(req, "Connection", field, sizeof(field))) {
+	return 0;
+    }
+
+    if (strcasecmp(field, "Upgrade")) {
+	fprintf(stderr, "wrong Connection [%s]\n", field);
+	return 0;
+    }
+
+    if (!header_get_field(req, "Sec-WebSocket-Key", field, sizeof(field))) {
+	return 0;
+    }
+
+    static const char *uuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+
+    strncat(field, uuid, sizeof(field) - 1);
+
+    SHA1((unsigned char *)field, strlen(field), sha1buf);
+
+    char *key_b64 = (char *)simple_connection_base64_encode((const unsigned char *)sha1buf, sizeof(sha1buf), NULL);
+
+    snprintf(req, sizeof(req), "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\nSec-WebSocket-Protocol: binary\r\n\r\n",
+	    key_b64);
+
+    free(key_b64);
+
+    //fprintf(stderr, "Send req [%s]\n", req);
+
+    if (tcp_write_internal(channel, req, strlen(req)) != strlen(req)) {
+	fprintf(stderr, "%s: tcp_write()\n", __func__);
+	return 0;
+    }
+
+    return 1;
+}
+
+static int http_ws_method_client(tcp_channel *channel)
+{
+    char key[16];
+    char req[1024];
+
+    if (simple_connection_get_random(key, 16, 0) == -1) {
+	fprintf(stderr, "%s: get_random()\n", __func__);
+	return 0;
+    }
+
+    char *key_b64 = (char *)simple_connection_base64_encode((const unsigned char *)key, 16, NULL);
+
+    snprintf(req, sizeof(req), "GET %s HTTP/1.1\r\nHost: %s\r\nSec-WebSocket-Version: 13\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Protocol: binary\r\n\r\n",
+	    channel->path ? channel->path : "/", channel->host, key_b64);
+
+    free(key_b64);
+
+    //fprintf(stderr, "Send req [%s]\n", req);
+
+    if (tcp_write_internal(channel, req, strlen(req)) != strlen(req)) {
+	fprintf(stderr, "%s: tcp_write()\n", __func__);
+	return 0;
+    }
+
+    if (get_http_header(channel, req, sizeof(req)) <= 0) {
+	fprintf(stderr, "%s: get_http_header()\n", __func__);
+	return 0;
+    }
+
+    //fprintf(stderr, "method ws get [%s]\n", req);
+
+    static const char *reply = "HTTP/1.1 101 Switching Protocols";
+
+    if (strncasecmp(req, reply, strlen(reply))) {
+	fprintf(stderr, "\nwebsocket error\n");
+	return 0;
+    }
+
+    //fprintf(stderr, "\nwebsocket enabled\n");
+
+    return 1;
+}
+
+int tcp_connection_upgrade(tcp_channel *u, int connection_method, const char *path)
+{
+    if (connection_method == SIMPLE_CONNECTION_METHOD_WS) {
+	ws_t *ws = malloc(sizeof(ws_t));
+	ws->avail = 0;
+	u->path = (char *)path;
+	if ((u->primary_mode == TCP_SSL_CLIENT) || (u->primary_mode == TCP_CLIENT)) {
+	    if (http_ws_method_client(u)) {
+		u->connection_method = connection_method;
+		u->ws = ws;
+		return 1;
+	    }
+	} else if ((u->primary_mode == TCP_SSL_SERVER) || (u->primary_mode == TCP_SERVER)) {
+	    if (http_ws_method_server(u)) {
+		u->connection_method = connection_method;
+		u->ws = ws;
+		return 1;
+	    }
+	}
+	free(ws);
+	return 0;
+    }
+
+    return 1;
+}
+
+static int send_ws_header(tcp_channel *channel, int len)
+{
+    int sz;
+    uint8_t opcode = WS_OPCODE_BINARY_FRAME;
+    int blen = len;
+    unsigned char *mask;
+    ws_t *ws = channel->ws;
+
+    ws->header.b0 = 0x80 | (opcode & 0x0f);
+    if (blen <= 125) {
+	ws->header.b1 = (uint8_t)blen;
+	mask = ws->header.u.m.c;
+	sz = 2;
+    } else if (blen <= 65535) {
+	ws->header.b1 = 0x7e;
+	ws->header.u.s16.l16 = WS_HTON16((uint16_t)blen);
+	mask = ws->header.u.s16.m16.c;
+	sz = 4;
+    } else {
+	ws->header.b1 = 0x7f;
+	ws->header.u.s64.l64 = WS_HTON64(blen);
+	mask = ws->header.u.s64.m64.c;
+	sz = 10;
+    }
+
+    ws->header.b1 |= 0x80; // mask flag
+    sz += 4;
+    if (simple_connection_get_random(mask, 4, 0) == -1) {
+	fprintf(stderr, "%s: get_random()\n", __func__);
+	return 0;
+    }
+
+    //write_log("SZ=%d KEY=%02X %02X %02X %02X\n", sz, mask[0], mask[1], mask[2], mask[3]);
+
+    if (tcp_write_internal(channel, (char *)&ws->header, sz) != sz) {
+	fprintf(stderr, "%s: tcp_write()\n", __func__);
+	return 0;
+    }
+
+    return 1;
+}
+
+static int recv_ws_header(tcp_channel *channel)
+{
+    int len;
+
+    ws_t *ws = channel->ws;
+
+    if (tcp_read_internal(channel, (char *)&ws->header.b0, 1) != 1) {
+	fprintf(stderr, "%s: tcp_read()\n", __func__);
+	return 0;
+    }
+
+    if (tcp_read_internal(channel, (char *)&ws->header.b1, 1) != 1) {
+	fprintf(stderr, "%s: tcp_read()\n", __func__);
+	return 0;
+    }
+
+    //write_log("OPCODE %02X %02X\n", channel->ws.header.b0, channel->ws.header.b1);
+
+    if (ws->header.b0 != (0x80 | WS_OPCODE_BINARY_FRAME) && ws->header.b0 != (0x80 | WS_OPCODE_CLOSE) &&
+	ws->header.b0 != WS_OPCODE_CONTINUATION) {
+	fprintf(stderr, "Unknown ws opcode %02X %02X\n", ws->header.b0, ws->header.b1);
+	return 0;
+    }
+
+    if (ws->header.b0 == WS_OPCODE_CONTINUATION) {
+	fprintf(stderr, "Continuation %02X %02X\n", ws->header.b0, ws->header.b1);
+	if ((ws->header.b1 & 0x7f) == 0) {
+	    return recv_ws_header(channel);
+	}
+    }
+
+    if (ws->header.b0 == (0x80 | WS_OPCODE_CLOSE)) {
+	char buf[ws->header.b1 + 1];
+	buf[ws->header.b1] = 0;
+	if (tcp_read_internal(channel, buf, ws->header.b1) != ws->header.b1) {
+	    fprintf(stderr, "%s: tcp_read()\n", __func__);
+	    return 0;
+	}
+
+	fprintf(stderr, "Connection closed [%s]\n", buf + 2);
+
+	return 0;
+    }
+
+    if ((ws->header.b1 & 0x7f) == 0x7e) {
+	if (tcp_read_internal(channel, (char *)&ws->header.u.s16.l16, 2) != 2) {
+	    fprintf(stderr, "%s: 0x7e - tcp_read()\n", __func__);
+	    return 0;
+	}
+	len = WS_NTOH16(ws->header.u.s16.l16);
+    } else if ((ws->header.b1 & 0x7f) == 0x7f) {
+	if (tcp_read_internal(channel, (char *)&ws->header.u.s64.l64, 8) != 8) {
+	    fprintf(stderr, "%s: 0x7f - tcp_read()\n", __func__);
+	    return 0;
+	}
+	len = WS_NTOH16(ws->header.u.s64.l64);
+    } else {
+	len = ws->header.b1 & 0x7f;
+    }
+
+    if (ws->header.b1 & 0x80) {
+	if (tcp_read_internal(channel, (char *)&ws->header.u.m.c, 4) != 4) {
+	    fprintf(stderr, "%s: mask - tcp_read()\n", __func__);
+	    return 0;
+	}
+	//fprintf(stderr, "ws mask %08X\n", channel->ws.header.u.m.u);
+	//fprintf(stderr, "ws mask?!\n");
+    }
+
+//    fprintf(stderr, "ws payload %d\n", len);
+
+    return len;
+}
+
+static void ws_mask_data(ws_t *ws, char *data, int len)
+{
+    int i;
+    unsigned char *mask;
+
+    if (!(ws->header.b1 & 0x80)) {
+	return;
+    }
+
+    switch (ws->header.b1 & 0x7f) {
+    case 0x7e: mask = ws->header.u.s16.m16.c; break;
+    case 0x7f: mask = ws->header.u.s64.m64.c; break;
+    default: mask = ws->header.u.m.c;
+    }
+
+    for (i = 0; i < len; i++) {
+      data[i] ^= mask[i % 4];
+    }
+}
+
+int tcp_write(tcp_channel *u, char *buf, size_t len)
+{
+    char *tmp = alloca(len);
+
+    if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
+	if (!send_ws_header(u, len)) {
+	    return 0;
+	}
+    }
+
+    memcpy(tmp, buf, len);
+
+    if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
+	ws_mask_data(u->ws, tmp, len);
+    }
+
+    if (tcp_write_internal(u, tmp, len) != len) {
+	fprintf(stderr, "tcp_write()\n");
+	return 0;
+    }
+
+    return len;
+}
+
+int tcp_read(tcp_channel *u, char *buf, size_t len)
+{
+    int avail;
+    ws_t *ws = NULL;
+    char *tmp = alloca(len);
+
+    if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
+	ws = u->ws;
+	if (ws->avail > 0) {
+	    avail = ws->avail;
+	} else {
+	    if (!(avail = recv_ws_header(u))) {
+		return 0;
+	    }
+	    ws->avail = avail;
+	}
+	avail = (avail < len) ? avail : len;
+    } else {
+	avail = len;
+    }
+
+    //fprintf(stderr, ">>>>>> %d\n", avail);
+
+    int ret = tcp_read_internal(u, tmp, avail);
+    if (ret > 0) {
+	if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
+	    ws->avail -= ret;
+	}
+
+	if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
+	    ws_mask_data(u->ws, tmp, ret);
+	}
+
+	memcpy(buf, tmp, ret);
+    }
+
+    return ret;
 }

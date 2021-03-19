@@ -10,6 +10,14 @@ AC_PATH_PROG([PKG_CONFIG], [pkg-config])
 PKG_CHECK_MODULES(OPENSSL, libssl libcrypto)
 PKG_CHECK_MODULES_STATIC(OPENSSL_STATIC, libssl libcrypto)
 
+case $host_os in
+linux*)
+    CFLAGS="$CFLAGS -D_GNU_SOURCE"
+    ;;
+esac
+
+CFLAGS="$CFLAGS -Wall -Wpedantic"
+
 AC_SUBST(LIBTOOL_DEPS)
 AC_SUBST([OPENSSL_INCLUDES])
 AC_SUBST([OPENSSL_LIBS])

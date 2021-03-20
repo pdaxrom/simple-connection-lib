@@ -144,6 +144,7 @@ __attribute__ ((__packed__))
 typedef struct ws_s {
     ws_header_t header;
     int avail;
+    int pos;
 } ws_t;
 
 static const char *SSL_CIPHER_LIST = "ALL:!LOW";
@@ -620,6 +621,7 @@ int tcp_connection_upgrade(tcp_channel *u, int connection_method, const char *pa
     if (connection_method == SIMPLE_CONNECTION_METHOD_WS) {
 	ws_t *ws = malloc(sizeof(ws_t));
 	ws->avail = 0;
+	ws->pos = 0;
 	u->path = (char *)path;
 	if ((u->primary_mode == TCP_SSL_CLIENT) || (u->primary_mode == TCP_CLIENT)) {
 	    if (http_ws_method_client(u)) {
@@ -699,10 +701,11 @@ static int recv_ws_header(tcp_channel *channel)
 	return 0;
     }
 
-    //write_log("OPCODE %02X %02X\n", channel->ws.header.b0, channel->ws.header.b1);
+    //fprintf(stderr, "OPCODE %02X %02X\n", ws->header.b0 & 0xFF, ws->header.b1 & 0xFF);
 
-    if (ws->header.b0 != (0x80 | WS_OPCODE_BINARY_FRAME) && ws->header.b0 != (0x80 | WS_OPCODE_CLOSE) &&
-	ws->header.b0 != WS_OPCODE_CONTINUATION) {
+    if ((ws->header.b0 != (0x80 | WS_OPCODE_BINARY_FRAME)) &&
+	(ws->header.b0 != (0x80 | WS_OPCODE_CLOSE)) &&
+	(ws->header.b0 != WS_OPCODE_CONTINUATION)) {
 	fprintf(stderr, "Unknown ws opcode %02X %02X\n", ws->header.b0, ws->header.b1);
 	return 0;
     }
@@ -738,24 +741,24 @@ static int recv_ws_header(tcp_channel *channel)
 	    fprintf(stderr, "%s: 0x7f - tcp_read()\n", __func__);
 	    return 0;
 	}
-	len = WS_NTOH16(ws->header.u.s64.l64);
+	len = WS_NTOH64(ws->header.u.s64.l64);
     } else {
 	len = ws->header.b1 & 0x7f;
     }
 
     if (ws->header.b1 & 0x80) {
 	if ((ws->header.b1 & 0x7f) == 0x7e) {
-	    if (tcp_read_internal(channel, (char *)&ws->header.u.s16.m16.c, 4) != 4) {
+	    if (tcp_read_internal(channel, (char *)ws->header.u.s16.m16.c, 4) != 4) {
 		fprintf(stderr, "%s: 0x7e mask - tcp_read()\n", __func__);
 		return 0;
 	    }
 	} else if ((ws->header.b1 & 0x7f) == 0x7f) {
-	    if (tcp_read_internal(channel, (char *)&ws->header.u.s64.m64.c, 4) != 4) {
+	    if (tcp_read_internal(channel, (char *)ws->header.u.s64.m64.c, 4) != 4) {
 		fprintf(stderr, "%s: 0x7f mask - tcp_read()\n", __func__);
 		return 0;
 	    }
 	} else {
-	    if (tcp_read_internal(channel, (char *)&ws->header.u.m.c, 4) != 4) {
+	    if (tcp_read_internal(channel, (char *)ws->header.u.m.c, 4) != 4) {
 		fprintf(stderr, "%s: mask - tcp_read()\n", __func__);
 		return 0;
 	    }
@@ -764,7 +767,7 @@ static int recv_ws_header(tcp_channel *channel)
 	//fprintf(stderr, "ws mask?!\n");
     }
 
-//    fprintf(stderr, "ws payload %d\n", len);
+    //fprintf(stderr, "ws payload %d\n", len);
 
     return len;
 }
@@ -785,7 +788,7 @@ static void ws_mask_data(ws_t *ws, char *data, int len)
     }
 
     for (i = 0; i < len; i++) {
-      data[i] ^= mask[i % 4];
+      data[i] ^= mask[(ws->pos + i) % 4];
     }
 }
 
@@ -797,6 +800,8 @@ int tcp_write(tcp_channel *u, char *buf, size_t len)
 	if (!send_ws_header(u, len)) {
 	    return 0;
 	}
+	ws_t *ws = u->ws;
+	ws->pos = 0;
     }
 
     memcpy(tmp, buf, len);
@@ -828,20 +833,21 @@ int tcp_read(tcp_channel *u, char *buf, size_t len)
 		return 0;
 	    }
 	    ws->avail = avail;
+	    ws->pos = 0;
 	}
 	avail = (avail < len) ? avail : len;
     } else {
 	avail = len;
     }
 
-    //fprintf(stderr, ">>>>>> %d\n", avail);
+    //fprintf(stderr, ">>>>>> avail=%d need=%d\n", avail, len);
 
     int ret = tcp_read_internal(u, tmp, avail);
     if (ret > 0) {
 	if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
 	    ws->avail -= ret;
-
 	    ws_mask_data(u->ws, tmp, ret);
+	    ws->pos += ret;
 	}
 
 	memcpy(buf, tmp, ret);

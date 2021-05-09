@@ -59,12 +59,15 @@ typedef struct _tcp_channel {
     SSL_CTX *ctx;
     char *host;
     char *path;
+    char *ws_path;
     int connection_method;
     /* ws socket mode */
     void *ws;
 } tcp_channel;
 
 #define tcp_fd(u) (u->s)
+
+#define tcp_ws_path(u) (u->ws_path)
 
 #ifdef __cplusplus
 extern "C" {

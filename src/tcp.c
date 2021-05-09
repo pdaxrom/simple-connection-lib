@@ -347,6 +347,10 @@ int tcp_close(tcp_channel *u)
 	closesocket(u->s);
     }
 
+    if (u->ws_path) {
+	free(u->ws_path);
+    }
+
     if (u->ws) {
 	free(u->ws);
     }
@@ -564,9 +568,13 @@ static int http_ws_method_server(tcp_channel *channel, char *request, size_t len
 	return 0;
     }
 
-    if (strcmp(field, channel->path)) {
-	fprintf(stderr, "wrong path [%s]\n", field);
-	return 0;
+    if (channel->path) {
+	if (strcmp(field, channel->path)) {
+	    fprintf(stderr, "wrong path [%s]\n", field);
+	    return 0;
+	}
+    } else {
+	channel->ws_path = strdup(field);
     }
 
     if (!header_get_field(req, "Sec-WebSocket-Key", field, sizeof(field))) {

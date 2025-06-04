@@ -147,7 +147,9 @@ typedef struct ws_s {
     int pos;
 } ws_t;
 
+#ifdef ENABLE_SSL
 static const char *SSL_CIPHER_LIST = "ALL:!LOW";
+#endif
 
 #ifdef _WIN32
 typedef int socklen_t;
@@ -171,6 +173,7 @@ static int winsock_init(void)
 }
 #endif
 
+#ifdef ENABLE_SSL
 static SSL_CTX *ssl_initialize(char *sslkeyfile, char *sslcertfile)
 {
     SSL_CTX *ssl_context;
@@ -230,6 +233,7 @@ static void ssl_tear_down(SSL_CTX *ctx)
 {
     SSL_CTX_free(ctx);
 }
+#endif
 
 tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, char *sslcertfile)
 {
@@ -279,9 +283,16 @@ tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, ch
 	    free(u);
 	    return NULL;
 	}
-	
+
 	if (mode == TCP_SSL_SERVER) {
+#ifdef ENABLE_SSL
 	    u->ctx = ssl_initialize(sslkeyfile, sslcertfile);
+#else
+	    fprintf(stderr, "ssl support missed in this configuration!\n");
+	    closesocket(u->s);
+	    free(u);
+	    return NULL;
+#endif
 	}
     } else {
 	struct hostent *server = gethostbyname(addr);
@@ -304,6 +315,7 @@ tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, ch
 	}
 
 	if (mode == TCP_SSL_CLIENT) {
+#ifdef ENABLE_SSL
 	    u->ctx = ssl_client_initialize();
 	    u->ssl = SSL_new(u->ctx);
 	    SSL_set_tlsext_host_name(u->ssl, addr);
@@ -316,6 +328,12 @@ tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, ch
 		free(u);
 		return NULL;
 	    }
+#else
+	    fprintf(stderr, "ssl support missed in this configuration!\n");
+	    closesocket(u->s);
+	    free(u);
+	    return NULL;
+#endif
 	}
     }
 
@@ -335,6 +353,7 @@ int tcp_close(tcp_channel *u)
 	    tcp_write_ws(u, WS_OPCODE_CLOSE, buf, sizeof(buf));
 	}
 
+#ifdef ENABLE_SSL
 	if ((u->mode == TCP_SSL_CLIENT) || (u->mode == TCP_SSL_SERVER)) {
 	    if (u->mode == TCP_SSL_CLIENT) {
 		SSL_shutdown(u->ssl);
@@ -344,6 +363,7 @@ int tcp_close(tcp_channel *u)
 		ssl_tear_down(u->ctx);
 	    }
 	}
+#endif
 	closesocket(u->s);
     }
 
@@ -387,6 +407,7 @@ tcp_channel *tcp_accept(tcp_channel *u)
 	return NULL;
     }
 
+#ifdef ENABLE_SSL
     if (u->mode == TCP_SSL_SERVER) {
 	if ((n->ssl = SSL_new(u->ctx)) == NULL) {
 	    fprintf(stderr, "Failed to create SSL connection.\n");
@@ -406,6 +427,7 @@ tcp_channel *tcp_accept(tcp_channel *u)
 	    return NULL;
 	}
     }
+#endif
 
     return n;
 }
@@ -414,11 +436,14 @@ static int tcp_read_internal(tcp_channel *u, char *buf, size_t len)
 {
     int r;
 
+#ifdef ENABLE_SSL
     if ((u->mode == TCP_SSL_CLIENT) || (u->mode == TCP_SSL_SERVER)) {
 	if ((r = SSL_read(u->ssl, buf, len)) < 0) {
 	    fprintf(stderr, "SSL_read()\n");
 	}
-    } else {
+    } else
+#endif
+    {
 	if ((r = recv(u->s, buf, len, 0)) == -1) {
 	    fprintf(stderr, "recvfrom()\n");
 	}
@@ -430,11 +455,14 @@ static int tcp_read_internal(tcp_channel *u, char *buf, size_t len)
 static int tcp_write_internal(tcp_channel *u, char *buf, size_t len)
 {
     int r;
+#ifdef ENABLE_SSL
     if ((u->mode == TCP_SSL_CLIENT) || (u->mode == TCP_SSL_SERVER)) {
 	if ((r = SSL_write(u->ssl, buf, len)) < 0) {
 	    fprintf(stderr, "SSL_write()\n");
 	}
-    } else {
+    } else
+#endif
+    {
 	if ((r = send(u->s, buf, len, 0)) < 0) {
 	    fprintf(stderr, "sendto()\n");
 	}
@@ -529,7 +557,9 @@ static int http_ws_method_server(tcp_channel *channel, char *request, size_t len
 {
     char req[1024];
     char field[256];
+#ifdef ENABLE_SSL
     unsigned char sha1buf[SHA_DIGEST_LENGTH];
+#endif
 
     if (request) {
 	*request = 0;
@@ -585,9 +615,13 @@ static int http_ws_method_server(tcp_channel *channel, char *request, size_t len
 
     strncat(field, uuid, sizeof(field) - 1);
 
+#ifdef ENABLE_SSL
     SHA1((unsigned char *)field, strlen(field), sha1buf);
 
     char *key_b64 = (char *)simple_connection_base64_encode((const unsigned char *)sha1buf, sizeof(sha1buf), NULL);
+#else
+    char *key_b64 = (char *)simple_connection_base64_encode((const unsigned char *)field, strlen(field), NULL);
+#endif
 
     snprintf(req, sizeof(req), "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\nSec-WebSocket-Protocol: binary\r\n\r\n",
 	    key_b64);

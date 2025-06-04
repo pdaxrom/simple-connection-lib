@@ -34,8 +34,10 @@
 #else
 #include <windows.h>
 #endif
+#ifdef ENABLE_SSL
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#endif
 
 enum {
     TCP_SERVER = 0,
@@ -55,8 +57,10 @@ typedef struct _tcp_channel {
     struct sockaddr_in my_addr;
     int mode;
     int primary_mode;
+#ifdef ENABLE_SSL
     SSL *ssl;
     SSL_CTX *ctx;
+#endif
     char *host;
     char *path;
     char *ws_path;

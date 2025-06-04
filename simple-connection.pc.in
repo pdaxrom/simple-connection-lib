@@ -7,5 +7,5 @@ Name: simple-connection
 Description: TCP/UDP simple connection
 Version: @VERSION@
 Requires.private: libssl libcrypto
-Cflags: -I${includedir}
+Cflags: -I${includedir} @C_DEFINES@
 Libs: -L${libdir} -lsimple_connection

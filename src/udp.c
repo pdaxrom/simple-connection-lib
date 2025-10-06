@@ -29,6 +29,7 @@
 #ifndef _WIN32
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <netdb.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -40,6 +41,10 @@
 #define PORT 9930
 
 #include "udp.h"
+
+/* Logging extern */
+extern enum log_level current_log_level;
+extern void simple_connection_log(enum log_level level, const char *format, ...);
 
 #ifdef _WIN32
 typedef int socklen_t;
@@ -65,6 +70,9 @@ static int winsock_init(void)
 
 udp_channel *udp_open(int mode, char *addr, int port)
 {
+    if (port <= 0 || port > 65535) {
+	return NULL;
+    }
 #ifdef _WIN32
     if (winsock_init())
 	return NULL;
@@ -74,42 +82,115 @@ udp_channel *udp_open(int mode, char *addr, int port)
 
     u->mode = mode;
 
-    if ((u->s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
-	free(u);
-	return NULL;
-    }
-
-    memset(&u->my_addr, 0, sizeof(u->my_addr));
-    u->my_addr.sin_family = AF_INET;
-    u->my_addr.sin_port = htons(port);
-
     if (mode == UDP_SERVER) {
-	u->my_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+#ifndef sgi
+	if ((u->s = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
+	    free(u);
+	    return NULL;
+	}
+#ifndef _WIN32
+	int no = 0;
+	if(setsockopt(u->s, IPPROTO_IPV6, IPV6_V6ONLY, &no, sizeof(int)) == -1) {
+	    log_error("setsockopt() IPV6_V6ONLY failed");
+	    free(u);
+	    return NULL;
+	}
+#endif
 
-	if (bind(u->s, (struct sockaddr* ) &u->my_addr, sizeof(u->my_addr)) == -1) {
-    	    fprintf(stderr, "bind() failed\n");
-	    closesocket(u->s);
+	memset(&u->my_addr, 0, sizeof(u->my_addr));
+	struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&u->my_addr;
+	sin6->sin6_family = AF_INET6;
+	sin6->sin6_addr = in6addr_any;
+	sin6->sin6_port = htons(port);
+	u->addrlen = sizeof(struct sockaddr_in6);
+
+ 	if (bind(u->s, (struct sockaddr* ) &u->my_addr, u->addrlen) == -1) {
+      	    log_error("bind() failed");
+  	    closesocket(u->s);
+  	    free(u);
+  	    return NULL;
+  	}
+
+	u->inp_addr = (struct sockaddr_storage *) malloc(sizeof(struct sockaddr_storage));
+	u->out_addr = (struct sockaddr_storage *) malloc(sizeof(struct sockaddr_storage));
+#else
+	if ((u->s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
 	    free(u);
 	    return NULL;
 	}
 
-	u->inp_addr = (struct sockaddr_in *) malloc(sizeof(struct sockaddr_in));
-	u->out_addr = (struct sockaddr_in *) malloc(sizeof(struct sockaddr_in));
+	memset(&u->my_addr, 0, sizeof(u->my_addr));
+	struct sockaddr_in *sin = (struct sockaddr_in *)&u->my_addr;
+	sin->sin_family = AF_INET;
+	sin->sin_addr.s_addr = htonl(INADDR_ANY);
+	sin->sin_port = htons(port);
+	u->addrlen = sizeof(struct sockaddr_in);
+
+ 	if (bind(u->s, (struct sockaddr* ) &u->my_addr, u->addrlen) == -1) {
+      	    log_error("bind() failed");
+  	    closesocket(u->s);
+  	    free(u);
+  	    return NULL;
+  	}
+
+	u->inp_addr = (struct sockaddr_storage *) malloc(sizeof(struct sockaddr_storage));
+	u->out_addr = (struct sockaddr_storage *) malloc(sizeof(struct sockaddr_storage));
+#endif
     } else {
+#ifndef sgi
+	char port_str[6];
+	struct addrinfo hints = {0}, *res, *p;
+	int success = 0;
+
+	snprintf(port_str, sizeof(port_str), "%d", port);
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_DGRAM;
+	hints.ai_protocol = IPPROTO_UDP;
+
+	if (getaddrinfo(addr, port_str, &hints, &res) != 0) {
+	    log_error("getaddrinfo() failed");
+	    free(u);
+	    return NULL;
+	}
+
+	for (p = res; p != NULL; p = p->ai_next) {
+	    if ((u->s = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+		continue;
+	    }
+	    memcpy(&u->my_addr, p->ai_addr, p->ai_addrlen);
+	    u->addrlen = p->ai_addrlen;
+	    success = 1;
+	    break;
+	}
+	freeaddrinfo(res);
+	if (!success) {
+	    log_error("socket() failed");
+	    free(u);
+	    return NULL;
+	}
 	u->inp_addr = NULL;
 	u->out_addr = NULL;
-
-#ifdef _WIN32
-	if ((u->my_addr.sin_addr.s_addr = inet_addr(addr)) == INADDR_NONE) {
-	    fprintf(stderr, "inet_addr() failed\n");
 #else
-	if (inet_aton(addr, &u->my_addr.sin_addr) == 0) {
-    	    fprintf(stderr, "inet_aton() failed\n");
-#endif
+	if ((u->s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
+	    free(u);
+	    return NULL;
+	}
+
+	memset(&u->my_addr, 0, sizeof(u->my_addr));
+	struct sockaddr_in *sin = (struct sockaddr_in *)&u->my_addr;
+	sin->sin_family = AF_INET;
+	sin->sin_port = htons(port);
+	u->addrlen = sizeof(struct sockaddr_in);
+
+	if (inet_pton(AF_INET, addr, &sin->sin_addr) != 1) {
+	    log_error("inet_pton() failed");
     	    closesocket(u->s);
     	    free(u);
     	    return NULL;
 	}
+	u->inp_addr = NULL;
+	u->out_addr = NULL;
+#endif
     }
 
     u->forward = NULL;
@@ -119,6 +200,9 @@ udp_channel *udp_open(int mode, char *addr, int port)
 
 int udp_close(udp_channel *u)
 {
+    if (!u) {
+	return -1;
+    }
     if (u->forward) {
 	udp_forward *tmp;
 	while (u->forward) {
@@ -134,7 +218,7 @@ int udp_close(udp_channel *u)
     if (u->out_addr) {
 	free(u->out_addr);
     }
-    if (u->s >=0) {
+    if (u->s >= 0) {
 	closesocket(u->s);
     }
     free(u);
@@ -151,24 +235,47 @@ int udp_close(udp_channel *u)
 
 int udp_read(udp_channel *u, void *buf, size_t len)
 {
+    if (!u || !buf) {
+	return -1;
+    }
     int r;
-    socklen_t slen = sizeof(u->my_addr);
+    socklen_t slen = sizeof(struct sockaddr_storage);
 
     if (u->mode == UDP_SERVER) {
         if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)u->inp_addr, &slen)) == -1) {
-    	    fprintf(stderr, "recvfrom()\n");
+      	    log_error("recvfrom() failed");
+	} else {
 #ifdef DEBUG
-    	} else {
-    	    fprintf(stderr, "Received packet from %s:%d size %d\n", inet_ntoa(u->inp_addr->sin_addr), ntohs(u->inp_addr->sin_port), r);
+	    char ipstr[INET6_ADDRSTRLEN];
+	    if (((struct sockaddr *)u->inp_addr)->sa_family == AF_INET) {
+		struct sockaddr_in *sin = (struct sockaddr_in *)u->inp_addr;
+		inet_ntop(AF_INET, &sin->sin_addr, ipstr, sizeof(ipstr));
+		log_debug("Received packet from %s:%d size %d", ipstr, ntohs(sin->sin_port), r);
+	    } else {
+		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)u->inp_addr;
+		inet_ntop(AF_INET6, &sin6->sin6_addr, ipstr, sizeof(ipstr));
+		log_debug("Received packet from [%s]:%d size %d", ipstr, ntohs(sin6->sin6_port), r);
+	    }
 #endif
 	}
+	u->inp_addrlen = slen;
 	*u->out_addr = *u->inp_addr;
+	u->out_addrlen = u->inp_addrlen;
     } else {
-        if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, &slen))==-1) {
-	    fprintf(stderr, "recvfrom()\n");
+        if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, &u->addrlen))==-1) {
+	    log_error("recvfrom() failed");
+	} else {
 #ifdef DEBUG
-        } else {
-	    fprintf(stderr, "Received packet from %s:%d size %d\n", inet_ntoa(u->my_addr.sin_addr), ntohs(u->my_addr.sin_port), r);
+	    char ipstr[INET6_ADDRSTRLEN];
+	    if (u->my_addr.ss_family == AF_INET) {
+		struct sockaddr_in *sin = (struct sockaddr_in *)&u->my_addr;
+		inet_ntop(AF_INET, &sin->sin_addr, ipstr, sizeof(ipstr));
+		log_debug("Received packet from %s:%d size %d", ipstr, ntohs(sin->sin_port), r);
+	    } else {
+		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&u->my_addr;
+		inet_ntop(AF_INET6, &sin6->sin6_addr, ipstr, sizeof(ipstr));
+		log_debug("Received packet from [%s]:%d size %d", ipstr, ntohs(sin6->sin6_port), r);
+	    }
 #endif
 	}
     }
@@ -178,16 +285,21 @@ int udp_read(udp_channel *u, void *buf, size_t len)
 
 int udp_write(udp_channel *u, void *buf, size_t len)
 {
+    if (!u || !buf) {
+	return -1;
+    }
     int r;
-    socklen_t slen = sizeof(u->my_addr);
+    socklen_t slen;
 
     if (u->mode == UDP_SERVER) {
+	slen = u->out_addrlen;
 	if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)u->out_addr, slen)) < 0) {
-	    fprintf(stderr, "sendto()\n");
+	    log_error("sendto() failed");
 	}
     } else {
+	slen = u->addrlen;
 	if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, slen)) == -1) {
-	    fprintf(stderr, "sendto()\n");
+	    log_error("sendto() failed");
 	}
     }
 
@@ -201,22 +313,41 @@ int udp_write(udp_channel *u, void *buf, size_t len)
 int udp_read_src(udp_channel *u, void *buf, size_t len)
 {
     int r;
-    socklen_t slen = sizeof(u->my_addr);
+    socklen_t slen = sizeof(struct sockaddr_storage);
 
     if (u->mode == UDP_SERVER) {
         if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)u->inp_addr, &slen)) == -1) {
-    	    fprintf(stderr, "recvfrom()\n");
+      	    log_error("recvfrom() failed");
+	} else {
 #ifdef DEBUG
-    	} else {
-    	    fprintf(stderr, "Received packet from %s:%d size %d\n", inet_ntoa(u->inp_addr->sin_addr), ntohs(u->inp_addr->sin_port), r);
+	    char ipstr[INET6_ADDRSTRLEN];
+	    if (((struct sockaddr *)u->inp_addr)->sa_family == AF_INET) {
+		struct sockaddr_in *sin = (struct sockaddr_in *)u->inp_addr;
+		inet_ntop(AF_INET, &sin->sin_addr, ipstr, sizeof(ipstr));
+		log_debug("Received packet from %s:%d size %d", ipstr, ntohs(sin->sin_port), r);
+	    } else {
+		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)u->inp_addr;
+		inet_ntop(AF_INET6, &sin6->sin6_addr, ipstr, sizeof(ipstr));
+		log_debug("Received packet from [%s]:%d size %d", ipstr, ntohs(sin6->sin6_port), r);
+	    }
 #endif
 	}
+	u->inp_addrlen = slen;
     } else {
-        if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, &slen))==-1) {
-	    fprintf(stderr, "recvfrom()\n");
+        if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, &u->addrlen))==-1) {
+	    log_error("recvfrom() failed");
+	} else {
 #ifdef DEBUG
-        } else {
-	    fprintf(stderr, "Received packet from %s:%d size %d\n", inet_ntoa(u->my_addr.sin_addr), ntohs(u->my_addr.sin_port), r);
+	    char ipstr[INET6_ADDRSTRLEN];
+	    if (u->my_addr.ss_family == AF_INET) {
+		struct sockaddr_in *sin = (struct sockaddr_in *)&u->my_addr;
+		inet_ntop(AF_INET, &sin->sin_addr, ipstr, sizeof(ipstr));
+		log_debug("Received packet from %s:%d size %d", ipstr, ntohs(sin->sin_port), r);
+	    } else {
+		struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&u->my_addr;
+		inet_ntop(AF_INET6, &sin6->sin6_addr, ipstr, sizeof(ipstr));
+		log_debug("Received packet from [%s]:%d size %d", ipstr, ntohs(sin6->sin6_port), r);
+	    }
 #endif
 	}
     }
@@ -253,6 +384,7 @@ int udp_forward_add(udp_channel *u, char *label)
 	return -1;
     }
     fwd->addr = *u->inp_addr;
+    fwd->addrlen = u->inp_addrlen;
     fwd->label = strdup(label);
     fwd->used = 1;
     fwd->total = 0;
@@ -280,7 +412,7 @@ int udp_forward_write(udp_channel *u, char *label, void *buf, size_t len)
     udp_forward *fwd = u->forward;
     while(fwd) {
 	if (!strncmp(fwd->label, label, 13)) {
-	    socklen_t slen = sizeof(fwd->addr);
+	    socklen_t slen = fwd->addrlen;
 	    int r;
 #ifdef DEBUG
 	    fprintf(stderr, "Forward to %s\n", fwd->label);
@@ -309,7 +441,16 @@ void udp_forward_show(udp_channel *u)
     }
     fprintf(stderr, "-- UDP forward table --\n");
     while (fwd) {
-	fprintf(stderr, "%s %s:%d %d\n", fwd->label, inet_ntoa(fwd->addr.sin_addr), ntohs(fwd->addr.sin_port), fwd->total);
+	char ipstr[INET6_ADDRSTRLEN];
+	if (fwd->addr.ss_family == AF_INET) {
+	    struct sockaddr_in *sin = (struct sockaddr_in *)&fwd->addr;
+	    inet_ntop(AF_INET, &sin->sin_addr, ipstr, sizeof(ipstr));
+	    fprintf(stderr, "%s %s:%d %d\n", fwd->label, ipstr, ntohs(sin->sin_port), fwd->total);
+	} else {
+	    struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&fwd->addr;
+	    inet_ntop(AF_INET6, &sin6->sin6_addr, ipstr, sizeof(ipstr));
+	    fprintf(stderr, "%s [%s]:%d %d\n", fwd->label, ipstr, ntohs(sin6->sin6_port), fwd->total);
+	}
 	fwd = fwd->next;
     }
     fprintf(stderr, "-----------------------\n");

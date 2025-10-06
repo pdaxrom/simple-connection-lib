@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdarg.h>
 #ifndef _WIN32
 #include <netdb.h>
 #include <arpa/inet.h>
@@ -161,7 +162,7 @@ typedef struct ws_s {
 } ws_t;
 
 #ifdef ENABLE_SSL
-static const char *SSL_CIPHER_LIST = "ALL:!LOW";
+static const char *SSL_CIPHER_LIST = "ECDHE+AESGCM:ECDHE+CHACHA20:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5:!PSK:!SRP:!CAMELLIA";
 #endif
 
 #ifdef _WIN32
@@ -240,10 +241,11 @@ static SSL_CTX *ssl_initialize(char *sslkeyfile, char *sslcertfile)
 
     /* 1. initialize context */
     if ((ssl_context = SSL_CTX_new(SSLv23_server_method())) == NULL) {
-	fprintf(stderr, "Failed to initialize SSL context.\n");
-	return NULL;
+ 	log_error("Failed to initialize SSL context");
+ 	return NULL;
     }
 
+    SSL_CTX_set_min_proto_version(ssl_context, TLS1_2_VERSION);
     SSL_CTX_set_options(ssl_context, SSL_OP_ALL);
 
     if (!SSL_CTX_set_cipher_list(ssl_context, SSL_CIPHER_LIST)) {
@@ -279,8 +281,11 @@ static SSL_CTX *ssl_client_initialize(void)
     ctx = SSL_CTX_new(meth);
 
     if (!ctx) {
-	ERR_print_errors_fp(stderr);
+ 	ERR_print_errors_fp(stderr);
+ 	return NULL;
     }
+
+    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
 
     return ctx;
 }
@@ -293,6 +298,9 @@ static void ssl_tear_down(SSL_CTX *ctx)
 
 tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, char *sslcertfile)
 {
+    if (port <= 0 || port > 65535) {
+	return NULL;
+    }
 #ifdef _WIN32
     if (winsock_init()) {
 	return NULL;
@@ -305,13 +313,40 @@ tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, ch
     u->mode = mode;
     u->primary_mode = mode;
 
-    if ((u->s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
-	fprintf(stderr, "socket() error!\n");
-	free(u);
-	return NULL;
-    }
-
     if ((mode == TCP_SERVER) || (mode == TCP_SSL_SERVER)) {
+#ifndef sgi
+	if ((u->s = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP)) == -1) {
+	    log_error("socket() error!");
+	    free(u);
+	    return NULL;
+	}
+#ifndef _WIN32
+	int yes = 1;
+	if(setsockopt(u->s, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+	    fprintf(stderr, "setsockopt() error!\n");
+	    free(u);
+	    return NULL;
+	}
+	int no = 0;
+	if(setsockopt(u->s, IPPROTO_IPV6, IPV6_V6ONLY, &no, sizeof(int)) == -1) {
+	    fprintf(stderr, "setsockopt() IPV6_V6ONLY error!\n");
+	    free(u);
+	    return NULL;
+	}
+#endif
+
+	memset(&u->my_addr, 0, sizeof(u->my_addr));
+	struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&u->my_addr;
+	sin6->sin6_family = AF_INET6;
+        sin6->sin6_addr = in6addr_any;
+        sin6->sin6_port = htons(port);
+	u->addrlen = sizeof(struct sockaddr_in6);
+#else
+	if ((u->s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
+	    log_error("socket() error!");
+	    free(u);
+	    return NULL;
+	}
 #ifndef _WIN32
 	int yes = 1;
 	if(setsockopt(u->s, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
@@ -322,11 +357,14 @@ tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, ch
 #endif
 
 	memset(&u->my_addr, 0, sizeof(u->my_addr));
-	u->my_addr.sin_family = AF_INET;
-        u->my_addr.sin_addr.s_addr = INADDR_ANY;
-        u->my_addr.sin_port = htons(port);
+	struct sockaddr_in *sin = (struct sockaddr_in *)&u->my_addr;
+	sin->sin_family = AF_INET;
+        sin->sin_addr.s_addr = INADDR_ANY;
+        sin->sin_port = htons(port);
+	u->addrlen = sizeof(struct sockaddr_in);
+#endif
 
-	if(bind(u->s, (struct sockaddr *)&u->my_addr, sizeof(u->my_addr)) == -1) {
+	if(bind(u->s, (struct sockaddr *)&u->my_addr, u->addrlen) == -1) {
 	    fprintf(stderr, "bind() error!\n");
 	    closesocket(u->s);
 	    free(u);
@@ -351,24 +389,68 @@ tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, ch
 #endif
 	}
     } else {
+#ifndef sgi
+	char port_str[6];
+	struct addrinfo hints = {0}, *res, *p;
+	int success = 0;
+
+	snprintf(port_str, sizeof(port_str), "%d", port);
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_protocol = IPPROTO_TCP;
+
+	if (getaddrinfo(addr, port_str, &hints, &res) != 0) {
+	    log_error("getaddrinfo() failed");
+	    free(u);
+	    return NULL;
+	}
+
+	for (p = res; p != NULL; p = p->ai_next) {
+	    if ((u->s = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+		continue;
+	    }
+	    if (connect(u->s, p->ai_addr, p->ai_addrlen) == 0) {
+		memcpy(&u->my_addr, p->ai_addr, p->ai_addrlen);
+		u->addrlen = p->ai_addrlen;
+		success = 1;
+		break;
+	    }
+	    closesocket(u->s);
+	}
+	freeaddrinfo(res);
+	if (!success) {
+	    log_error("connect() failed");
+	    free(u);
+	    return NULL;
+	}
+#else
 	struct hostent *server = gethostbyname(addr);
 	if (server == NULL) {
-	    fprintf(stderr, "gethostbyname() no such host\n");
+	    log_error("gethostbyname() no such host");
+	    free(u);
+	    return NULL;
+	}
+
+	if ((u->s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
+	    log_error("socket() error!");
 	    free(u);
 	    return NULL;
 	}
 
 	memset(&u->my_addr, 0, sizeof(u->my_addr));
-	u->my_addr.sin_family = AF_INET;
-        u->my_addr.sin_addr = *((struct in_addr *)server->h_addr);
-        u->my_addr.sin_port = htons(port);
+	struct sockaddr_in *sin = (struct sockaddr_in *)&u->my_addr;
+	sin->sin_family = AF_INET;
+        sin->sin_addr = *((struct in_addr *)server->h_addr);
+        sin->sin_port = htons(port);
+	u->addrlen = sizeof(struct sockaddr_in);
 
-	if (connect(u->s, (struct sockaddr *)&u->my_addr, sizeof(struct sockaddr)) == -1) {
-	    fprintf(stderr, "connect()\n");
+	if (connect(u->s, (struct sockaddr *)&u->my_addr, u->addrlen) == -1) {
+	    log_error("connect() failed");
 	    closesocket(u->s);
 	    free(u);
 	    return NULL;
 	}
+#endif
 
 	if (mode == TCP_SSL_CLIENT) {
 #ifdef ENABLE_SSL
@@ -378,14 +460,14 @@ tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, ch
 	    SSL_set_fd(u->ssl, u->s);
 	    int retval;
 	    if ((retval = SSL_connect(u->ssl)) < 0) {
-		fprintf(stderr, "SSL_connect(): %d\n", SSL_get_error(u->ssl, retval));
+		log_error("SSL_connect() failed: %d", SSL_get_error(u->ssl, retval));
 		SSL_free(u->ssl);
 		ssl_tear_down(u->ctx);
 		free(u);
 		return NULL;
 	    }
 #else
-	    fprintf(stderr, "ssl support missed in this configuration!\n");
+	    log_error("ssl support missed in this configuration!");
 	    closesocket(u->s);
 	    free(u);
 	    return NULL;
@@ -393,7 +475,7 @@ tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, ch
 	}
     }
 
-    u->host = (char *)addr;
+    u->host = addr;
 
     return u;
 }
@@ -402,6 +484,9 @@ static int tcp_write_ws(tcp_channel *u, uint8_t opcode, char *buf, size_t len);
 
 int tcp_close(tcp_channel *u)
 {
+    if (!u) {
+	return -1;
+    }
     if (u->s >= 0) {
 	if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
 	    char buf[] = { 0, 0, 'C', 'l', 'o', 's', 'e', 'd' };
@@ -445,6 +530,9 @@ int tcp_close(tcp_channel *u)
 
 tcp_channel *tcp_accept(tcp_channel *u)
 {
+    if (!u) {
+	return NULL;
+    }
     tcp_channel *n = (tcp_channel *)malloc(sizeof(tcp_channel));
     memset(n, 0, sizeof(tcp_channel));
 
@@ -456,12 +544,13 @@ tcp_channel *tcp_accept(tcp_channel *u)
 
     n->primary_mode = u->mode;
 
-    socklen_t l = sizeof(struct sockaddr);
+    socklen_t l = sizeof(struct sockaddr_storage);
     if ((n->s = accept(u->s, (struct sockaddr *)&n->my_addr, &l)) < 0) {
-	fprintf(stderr, "accept()\n");
+	log_error("accept() failed");
 	free(n);
 	return NULL;
     }
+    n->addrlen = l;
 
 #ifdef ENABLE_SSL
     if (u->mode == TCP_SSL_SERVER) {
@@ -622,7 +711,7 @@ static int http_ws_method_server(tcp_channel *channel, char *request, size_t len
     }
 
     if (get_http_header(channel, req, sizeof(req)) <= 0) {
-	fprintf(stderr, "%s: get_http_header()\n", __func__);
+	log_error("%s: get_http_header() failed", __func__);
 	return 0;
     }
 
@@ -836,35 +925,7 @@ static int recv_ws_header(tcp_channel *channel)
 	return 0;
     }
 
-    //fprintf(stderr, "OPCODE %02X %02X\n", ws->header.b0 & 0xFF, ws->header.b1 & 0xFF);
-
-    if ((ws->header.b0 != (0x80 | WS_OPCODE_BINARY_FRAME)) &&
-	(ws->header.b0 != (0x80 | WS_OPCODE_CLOSE)) &&
-	(ws->header.b0 != WS_OPCODE_CONTINUATION)) {
-	fprintf(stderr, "Unknown ws opcode %02X %02X\n", ws->header.b0, ws->header.b1);
-	return 0;
-    }
-
-    if (ws->header.b0 == WS_OPCODE_CONTINUATION) {
-	fprintf(stderr, "Continuation %02X %02X\n", ws->header.b0, ws->header.b1);
-	if ((ws->header.b1 & 0x7f) == 0) {
-	    return recv_ws_header(channel);
-	}
-    }
-
-    if (ws->header.b0 == (0x80 | WS_OPCODE_CLOSE)) {
-	char buf[ws->header.b1 + 1];
-	buf[ws->header.b1] = 0;
-	if (tcp_read_internal(channel, buf, ws->header.b1) != ws->header.b1) {
-	    fprintf(stderr, "%s: tcp_read()\n", __func__);
-	    return 0;
-	}
-
-	fprintf(stderr, "Connection closed [%s]\n", buf + 2);
-
-	return 0;
-    }
-
+    // Decode length
     if ((ws->header.b1 & 0x7f) == 0x7e) {
 	if (tcp_read_internal(channel, (char *)&ws->header.u.s16.l16, 2) != 2) {
 	    fprintf(stderr, "%s: 0x7e - tcp_read()\n", __func__);
@@ -902,6 +963,68 @@ static int recv_ws_header(tcp_channel *channel)
 	//fprintf(stderr, "ws mask?!\n");
     }
 
+    //fprintf(stderr, "OPCODE %02X %02X\n", ws->header.b0 & 0xFF, ws->header.b1 & 0xFF);
+
+    if ((ws->header.b0 != (0x80 | WS_OPCODE_BINARY_FRAME)) &&
+	(ws->header.b0 != (0x80 | WS_OPCODE_CLOSE)) &&
+	(ws->header.b0 != WS_OPCODE_CONTINUATION) &&
+	(ws->header.b0 != (0x80 | WS_OPCODE_PING)) &&
+	(ws->header.b0 != (0x80 | WS_OPCODE_PONG))) {
+	log_error("Unknown ws opcode %02X %02X", ws->header.b0, ws->header.b1);
+	return 0;
+    }
+
+    if (ws->header.b0 == WS_OPCODE_CONTINUATION) {
+	fprintf(stderr, "Continuation %02X %02X\n", ws->header.b0, ws->header.b1);
+	if (len == 0) {
+	    return recv_ws_header(channel);
+	}
+    }
+
+    if (ws->header.b0 == (0x80 | WS_OPCODE_CLOSE)) {
+	char buf[len + 1];
+	buf[len] = 0;
+	if (tcp_read_internal(channel, buf, len) != len) {
+	    fprintf(stderr, "%s: tcp_read()\n", __func__);
+	    return 0;
+	}
+
+	fprintf(stderr, "Connection closed [%s]\n", buf + 2);
+
+	return 0;
+    }
+
+    if (ws->header.b0 == (0x80 | WS_OPCODE_PING)) {
+	if (len > 125) {
+	    log_error("PING payload too large");
+	    return 0;
+	}
+	char ping_payload[126];
+	if (len > 0) {
+	    if (tcp_read_internal(channel, ping_payload, len) != len) {
+		log_error("Failed to read PING payload");
+		return 0;
+	    }
+	}
+	tcp_write_ws(channel, WS_OPCODE_PONG, ping_payload, len);
+	return recv_ws_header(channel);
+    }
+
+    if (ws->header.b0 == (0x80 | WS_OPCODE_PONG)) {
+	if (len > 125) {
+	    log_error("PONG payload too large");
+	    return 0;
+	}
+	if (len > 0) {
+	    char pong_payload[126];
+	    if (tcp_read_internal(channel, pong_payload, len) != len) {
+		log_error("Failed to read PONG payload");
+		return 0;
+	    }
+	}
+	return recv_ws_header(channel);
+    }
+
     //fprintf(stderr, "ws payload %d\n", len);
 
     return len;
@@ -929,6 +1052,11 @@ static void ws_mask_data(ws_t *ws, char *data, int len)
 
 static int tcp_write_ws(tcp_channel *u, uint8_t opcode, char *buf, size_t len)
 {
+    if (len > 1024 * 1024) {
+	log_error("WS message too large");
+	return 0;
+    }
+
     char *tmp = alloca(len);
 
     if (!send_ws_header(u, opcode, len)) {
@@ -954,20 +1082,44 @@ static int tcp_write_ws(tcp_channel *u, uint8_t opcode, char *buf, size_t len)
 
 int tcp_write(tcp_channel *u, void *buf, size_t len)
 {
+    if (!u || !buf) {
+	return -1;
+    }
+    if (len > 1024 * 1024) {
+	log_error("Message too large");
+	return -1;
+    }
+
     if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
 	return tcp_write_ws(u, WS_OPCODE_BINARY_FRAME, buf, len);
     }
 
     if (tcp_write_internal(u, buf, len) != len) {
-	fprintf(stderr, "tcp_write()\n");
+	log_error("tcp_write() failed");
 	return 0;
     }
 
     return len;
 }
 
+int tcp_send_ping(tcp_channel *u)
+{
+    if (!u || u->connection_method != SIMPLE_CONNECTION_METHOD_WS) {
+        return -1;
+    }
+    return tcp_write_ws(u, WS_OPCODE_PING, "", 0) == 0 ? 0 : -1;
+}
+
 int tcp_read(tcp_channel *u, void *buf, size_t len)
 {
+    if (!u || !buf) {
+	return -1;
+    }
+    if (len > 1024 * 1024) {
+	log_error("Read buffer too large");
+	return -1;
+    }
+
     int avail;
     ws_t *ws = NULL;
     char *tmp = alloca(len);

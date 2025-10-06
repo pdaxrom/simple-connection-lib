@@ -39,6 +39,8 @@
 #include <openssl/err.h>
 #endif
 
+#include "logging.h"
+
 enum {
     TCP_SERVER = 0,
     TCP_SSL_SERVER,
@@ -54,14 +56,15 @@ enum {
 
 typedef struct _tcp_channel {
     int s;
-    struct sockaddr_in my_addr;
+    struct sockaddr_storage my_addr;
+    socklen_t addrlen;
     int mode;
     int primary_mode;
 #ifdef ENABLE_SSL
     SSL *ssl;
     SSL_CTX *ctx;
 #endif
-    char *host;
+    const char *host;
     char *path;
     char *ws_path;
     int connection_method;
@@ -82,6 +85,7 @@ tcp_channel *tcp_accept(tcp_channel *u);
 int tcp_connection_upgrade(tcp_channel *u, int connection_method, const char *path, char *request, size_t len);
 int tcp_read(tcp_channel *u, void *buf, size_t len);
 int tcp_write(tcp_channel *u, void *buf, size_t len);
+int tcp_send_ping(tcp_channel *u);
 int tcp_close(tcp_channel *u);
 
 #ifdef __cplusplus

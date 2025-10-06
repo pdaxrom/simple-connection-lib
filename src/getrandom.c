@@ -41,6 +41,9 @@
  */
 int simple_connection_get_random(void *buf, size_t buflen, unsigned int flags)
 {
+	if (!buf || buflen == 0) {
+		return -1;
+	}
 #if defined(_WIN32)
     int ret = -1;
     HCRYPTPROV hProvider = 0;

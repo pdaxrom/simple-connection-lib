@@ -29,6 +29,9 @@ static const unsigned char base64_table[65] =
 unsigned char *simple_connection_base64_encode(const unsigned char *src, size_t len,
 			      size_t *out_len)
 {
+	if (!src || !out_len) {
+		return NULL;
+	}
 	unsigned char *out, *pos;
 	const unsigned char *end, *in;
 	size_t olen;
@@ -97,6 +100,9 @@ unsigned char *simple_connection_base64_encode(const unsigned char *src, size_t 
 unsigned char *simple_connection_base64_decode(const unsigned char *src, size_t len,
 			      size_t *out_len)
 {
+	if (!src || !out_len) {
+		return NULL;
+	}
 	unsigned char dtable[256], *out, *pos, block[4], tmp;
 	size_t i, count, olen;
 	int pad = 0;

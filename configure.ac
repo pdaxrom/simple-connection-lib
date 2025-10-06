@@ -25,6 +25,15 @@ if test "${ENABLE_SSL}" = "yes"; then
     PKG_CHECK_MODULES_STATIC(OPENSSL_STATIC, libssl libcrypto)
 fi
 
+AC_ARG_ENABLE(tests,
+[  --enable-tests          enable unit tests],
+ENABLE_TESTS=$enableval,
+ENABLE_TESTS=yes)
+if test "${ENABLE_TESTS}" = "yes"; then
+    PKG_CHECK_MODULES(CMOCKA, cmocka)
+fi
+AM_CONDITIONAL(ENABLE_TESTS, test x$ENABLE_TESTS = xyes)
+
 CFLAGS="$CFLAGS -Wall -Wpedantic"
 
 AC_SUBST(C_DEFINES)
@@ -36,6 +45,7 @@ AC_SUBST([OPENSSL_STATIC_LIBS])
 AC_LTDL_DLLIB
 AC_CONFIG_FILES([src/Makefile
                  test/Makefile
+                 tests/Makefile
                  Makefile
                  simple-connection.pc])
 AC_OUTPUT

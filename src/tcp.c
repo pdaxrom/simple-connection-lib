@@ -299,11 +299,17 @@ static void ssl_tear_down(SSL_CTX *ctx)
 tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, char *sslcertfile)
 {
     if (port <= 0 || port > 65535) {
-	return NULL;
+        log_error("tcp_open: invalid port %d", port);
+ 	return NULL;
+    }
+    if (!addr && mode != TCP_SERVER && mode != TCP_SSL_SERVER) {
+        log_error("tcp_open: address required for client mode");
+        return NULL;
     }
 #ifdef _WIN32
     if (winsock_init()) {
-	return NULL;
+        log_error("tcp_open: winsock initialization failed");
+ 	return NULL;
     }
 #endif
 
@@ -316,20 +322,20 @@ tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, ch
     if ((mode == TCP_SERVER) || (mode == TCP_SSL_SERVER)) {
 #ifndef sgi
 	if ((u->s = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP)) == -1) {
-	    log_error("socket() error!");
+	    log_error("tcp_open: socket() error (%d)", SIMPLE_CONNECTION_ERROR_SOCKET);
 	    free(u);
 	    return NULL;
 	}
 #ifndef _WIN32
 	int yes = 1;
 	if(setsockopt(u->s, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-	    fprintf(stderr, "setsockopt() error!\n");
+	    log_error("tcp_open: setsockopt SO_REUSEADDR error (%d)", SIMPLE_CONNECTION_ERROR_SOCKET);
 	    free(u);
 	    return NULL;
 	}
 	int no = 0;
 	if(setsockopt(u->s, IPPROTO_IPV6, IPV6_V6ONLY, &no, sizeof(int)) == -1) {
-	    fprintf(stderr, "setsockopt() IPV6_V6ONLY error!\n");
+	    log_error("tcp_open: setsockopt IPV6_V6ONLY error (%d)", SIMPLE_CONNECTION_ERROR_SOCKET);
 	    free(u);
 	    return NULL;
 	}
@@ -343,14 +349,14 @@ tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, ch
 	u->addrlen = sizeof(struct sockaddr_in6);
 #else
 	if ((u->s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
-	    log_error("socket() error!");
+	    log_error("tcp_open: socket() error (%d)", SIMPLE_CONNECTION_ERROR_SOCKET);
 	    free(u);
 	    return NULL;
 	}
 #ifndef _WIN32
 	int yes = 1;
 	if(setsockopt(u->s, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-	    fprintf(stderr, "setsockopt() error!\n");
+	    log_error("tcp_open: setsockopt SO_REUSEADDR error (%d)", SIMPLE_CONNECTION_ERROR_SOCKET);
 	    free(u);
 	    return NULL;
 	}
@@ -365,14 +371,14 @@ tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, ch
 #endif
 
 	if(bind(u->s, (struct sockaddr *)&u->my_addr, u->addrlen) == -1) {
-	    fprintf(stderr, "bind() error!\n");
+	    log_error("tcp_open: bind() error (%d)", SIMPLE_CONNECTION_ERROR_BIND);
 	    closesocket(u->s);
 	    free(u);
 	    return NULL;
 	}
 
 	if (listen(u->s, 10) == -1) {
-	    fprintf(stderr, "listen() error!\n");
+	    log_error("tcp_open: listen() error (%d)", SIMPLE_CONNECTION_ERROR_LISTEN);
 	    closesocket(u->s);
 	    free(u);
 	    return NULL;
@@ -1083,11 +1089,12 @@ static int tcp_write_ws(tcp_channel *u, uint8_t opcode, char *buf, size_t len)
 int tcp_write(tcp_channel *u, void *buf, size_t len)
 {
     if (!u || !buf) {
-	return -1;
+        log_error("tcp_write: invalid arguments");
+ 	return SIMPLE_CONNECTION_ERROR_INVALID_ARGUMENT;
     }
     if (len > 1024 * 1024) {
-	log_error("Message too large");
-	return -1;
+ 	log_error("tcp_write: message too large");
+ 	return SIMPLE_CONNECTION_ERROR_INVALID_ARGUMENT;
     }
 
     if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
@@ -1095,8 +1102,8 @@ int tcp_write(tcp_channel *u, void *buf, size_t len)
     }
 
     if (tcp_write_internal(u, buf, len) != len) {
-	log_error("tcp_write() failed");
-	return 0;
+ 	log_error("tcp_write: write failed (%d)", SIMPLE_CONNECTION_ERROR_WRITE);
+ 	return SIMPLE_CONNECTION_ERROR_WRITE;
     }
 
     return len;
@@ -1105,19 +1112,21 @@ int tcp_write(tcp_channel *u, void *buf, size_t len)
 int tcp_send_ping(tcp_channel *u)
 {
     if (!u || u->connection_method != SIMPLE_CONNECTION_METHOD_WS) {
-        return -1;
+        log_error("tcp_send_ping: invalid channel or not WS");
+        return SIMPLE_CONNECTION_ERROR_INVALID_ARGUMENT;
     }
-    return tcp_write_ws(u, WS_OPCODE_PING, "", 0) == 0 ? 0 : -1;
+    return tcp_write_ws(u, WS_OPCODE_PING, "", 0) == 0 ? 0 : SIMPLE_CONNECTION_ERROR_WS;
 }
 
 int tcp_read(tcp_channel *u, void *buf, size_t len)
 {
     if (!u || !buf) {
-	return -1;
+        log_error("tcp_read: invalid arguments");
+ 	return SIMPLE_CONNECTION_ERROR_INVALID_ARGUMENT;
     }
     if (len > 1024 * 1024) {
-	log_error("Read buffer too large");
-	return -1;
+ 	log_error("tcp_read: buffer too large");
+ 	return SIMPLE_CONNECTION_ERROR_INVALID_ARGUMENT;
     }
 
     int avail;
@@ -1143,15 +1152,17 @@ int tcp_read(tcp_channel *u, void *buf, size_t len)
     //fprintf(stderr, ">>>>>> avail=%d need=%d\n", avail, len);
 
     int ret = tcp_read_internal(u, tmp, avail);
-    if (ret > 0) {
-	if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
-	    ws->avail -= ret;
-	    ws_mask_data(u->ws, tmp, ret);
-	    ws->pos += ret;
-	}
-
-	memcpy(buf, tmp, ret);
+    if (ret < 0) {
+        log_error("tcp_read: read failed (%d)", SIMPLE_CONNECTION_ERROR_READ);
+        return SIMPLE_CONNECTION_ERROR_READ;
     }
+    if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
+ 	ws->avail -= ret;
+ 	ws_mask_data(u->ws, tmp, ret);
+ 	ws->pos += ret;
+    }
+
+    memcpy(buf, tmp, ret);
 
     return ret;
 }

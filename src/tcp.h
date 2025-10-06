@@ -40,6 +40,7 @@
 #endif
 
 #include "logging.h"
+#include "errors.h"
 
 enum {
     TCP_SERVER = 0,

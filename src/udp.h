@@ -37,6 +37,7 @@
 #include <inttypes.h>
 
 #include "logging.h"
+#include "errors.h"
 
 enum {
     UDP_SERVER = 0,

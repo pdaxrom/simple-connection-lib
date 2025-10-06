@@ -71,7 +71,12 @@ static int winsock_init(void)
 udp_channel *udp_open(int mode, char *addr, int port)
 {
     if (port <= 0 || port > 65535) {
-	return NULL;
+        log_error("udp_open: invalid port %d", port);
+ 	return NULL;
+    }
+    if (!addr && mode == UDP_CLIENT) {
+        log_error("udp_open: address required for client mode");
+        return NULL;
     }
 #ifdef _WIN32
     if (winsock_init())
@@ -85,6 +90,7 @@ udp_channel *udp_open(int mode, char *addr, int port)
     if (mode == UDP_SERVER) {
 #ifndef sgi
 	if ((u->s = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
+	    log_error("udp_open: socket() error (%d)", SIMPLE_CONNECTION_ERROR_SOCKET);
 	    free(u);
 	    return NULL;
 	}
@@ -105,7 +111,7 @@ udp_channel *udp_open(int mode, char *addr, int port)
 	u->addrlen = sizeof(struct sockaddr_in6);
 
  	if (bind(u->s, (struct sockaddr* ) &u->my_addr, u->addrlen) == -1) {
-      	    log_error("bind() failed");
+      	    log_error("udp_open: bind() failed (%d)", SIMPLE_CONNECTION_ERROR_BIND);
   	    closesocket(u->s);
   	    free(u);
   	    return NULL;
@@ -127,7 +133,7 @@ udp_channel *udp_open(int mode, char *addr, int port)
 	u->addrlen = sizeof(struct sockaddr_in);
 
  	if (bind(u->s, (struct sockaddr* ) &u->my_addr, u->addrlen) == -1) {
-      	    log_error("bind() failed");
+      	    log_error("udp_open: bind() failed (%d)", SIMPLE_CONNECTION_ERROR_BIND);
   	    closesocket(u->s);
   	    free(u);
   	    return NULL;
@@ -148,7 +154,7 @@ udp_channel *udp_open(int mode, char *addr, int port)
 	hints.ai_protocol = IPPROTO_UDP;
 
 	if (getaddrinfo(addr, port_str, &hints, &res) != 0) {
-	    log_error("getaddrinfo() failed");
+	    log_error("udp_open: getaddrinfo() failed (%d)", SIMPLE_CONNECTION_ERROR_CONNECT);
 	    free(u);
 	    return NULL;
 	}
@@ -164,7 +170,7 @@ udp_channel *udp_open(int mode, char *addr, int port)
 	}
 	freeaddrinfo(res);
 	if (!success) {
-	    log_error("socket() failed");
+	    log_error("udp_open: socket() failed (%d)", SIMPLE_CONNECTION_ERROR_SOCKET);
 	    free(u);
 	    return NULL;
 	}
@@ -172,6 +178,7 @@ udp_channel *udp_open(int mode, char *addr, int port)
 	u->out_addr = NULL;
 #else
 	if ((u->s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
+	    log_error("udp_open: socket() error (%d)", SIMPLE_CONNECTION_ERROR_SOCKET);
 	    free(u);
 	    return NULL;
 	}
@@ -183,11 +190,11 @@ udp_channel *udp_open(int mode, char *addr, int port)
 	u->addrlen = sizeof(struct sockaddr_in);
 
 	if (inet_pton(AF_INET, addr, &sin->sin_addr) != 1) {
-	    log_error("inet_pton() failed");
-    	    closesocket(u->s);
-    	    free(u);
-    	    return NULL;
-	}
+	    log_error("udp_open: inet_pton() failed (%d)", SIMPLE_CONNECTION_ERROR_CONNECT);
+     	    closesocket(u->s);
+     	    free(u);
+     	    return NULL;
+ 	}
 	u->inp_addr = NULL;
 	u->out_addr = NULL;
 #endif
@@ -236,14 +243,16 @@ int udp_close(udp_channel *u)
 int udp_read(udp_channel *u, void *buf, size_t len)
 {
     if (!u || !buf) {
-	return -1;
+        log_error("udp_read: invalid arguments");
+ 	return SIMPLE_CONNECTION_ERROR_INVALID_ARGUMENT;
     }
     int r;
     socklen_t slen = sizeof(struct sockaddr_storage);
 
     if (u->mode == UDP_SERVER) {
         if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)u->inp_addr, &slen)) == -1) {
-      	    log_error("recvfrom() failed");
+      	    log_error("udp_read: recvfrom() failed (%d)", SIMPLE_CONNECTION_ERROR_READ);
+            return SIMPLE_CONNECTION_ERROR_READ;
 	} else {
 #ifdef DEBUG
 	    char ipstr[INET6_ADDRSTRLEN];

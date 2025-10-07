@@ -239,12 +239,12 @@ static SSL_CTX *ssl_initialize(char *sslkeyfile, char *sslcertfile)
     SSL_load_error_strings();
 
     /* 1. initialize context */
-    if ((ssl_context = SSL_CTX_new(SSLv23_server_method())) == NULL) {
+    if ((ssl_context = SSL_CTX_new(TLS_server_method())) == NULL) {
 	fprintf(stderr, "Failed to initialize SSL context.\n");
 	return NULL;
     }
 
-    SSL_CTX_set_options(ssl_context, SSL_OP_ALL);
+    SSL_CTX_set_options(ssl_context, SSL_OP_ALL | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
 
     if (!SSL_CTX_set_cipher_list(ssl_context, SSL_CIPHER_LIST)) {
 	fprintf(stderr, "Failed to set SSL cipher list.\n");
@@ -275,8 +275,9 @@ static SSL_CTX *ssl_client_initialize(void)
     SSL_load_error_strings();
     OpenSSL_add_all_algorithms();
     static const SSL_METHOD *meth;
-    meth = SSLv23_client_method();
+    meth = TLS_client_method();
     ctx = SSL_CTX_new(meth);
+    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
 
     if (!ctx) {
 	ERR_print_errors_fp(stderr);
@@ -300,6 +301,10 @@ tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, ch
 #endif
 
     tcp_channel *u = (tcp_channel *)malloc(sizeof(tcp_channel));
+    if (!u) {
+        fprintf(stderr, "malloc() failed\n");
+        return NULL;
+    }
     memset(u, 0, sizeof(tcp_channel));
 
     u->mode = mode;
@@ -446,6 +451,10 @@ int tcp_close(tcp_channel *u)
 tcp_channel *tcp_accept(tcp_channel *u)
 {
     tcp_channel *n = (tcp_channel *)malloc(sizeof(tcp_channel));
+    if (!n) {
+        fprintf(stderr, "malloc() failed\n");
+        return NULL;
+    }
     memset(n, 0, sizeof(tcp_channel));
 
     if (u->mode == TCP_SSL_SERVER) {
@@ -565,6 +574,10 @@ static char *copy_string(char *dst, int dstSize, char *src, int srcSize)
     if (!dst) {
 	dstSize = srcSize;
 	dst = malloc(dstSize + 1);
+	if (!dst) {
+	    fprintf(stderr, "malloc() failed\n");
+	    return NULL;
+	}
     } else {
 	dstSize = (srcSize > dstSize) ? dstSize : srcSize;
     }
@@ -661,6 +674,10 @@ static int http_ws_method_server(tcp_channel *channel, char *request, size_t len
 	}
     } else {
 	channel->ws_path = strdup(field);
+	if (!channel->ws_path) {
+	    fprintf(stderr, "strdup() failed\n");
+	    return 0;
+	}
     }
 
     if (!header_get_field(req, "Sec-WebSocket-Key", field, sizeof(field))) {
@@ -754,6 +771,10 @@ int tcp_connection_upgrade(tcp_channel *u, int connection_method, const char *pa
 {
     if (connection_method == SIMPLE_CONNECTION_METHOD_WS) {
 	ws_t *ws = malloc(sizeof(ws_t));
+	if (!ws) {
+	    fprintf(stderr, "malloc() failed\n");
+	    return 0;
+	}
 	ws->avail = 0;
 	ws->pos = 0;
 	u->path = (char *)path;
@@ -929,9 +950,14 @@ static void ws_mask_data(ws_t *ws, char *data, int len)
 
 static int tcp_write_ws(tcp_channel *u, uint8_t opcode, char *buf, size_t len)
 {
-    char *tmp = alloca(len);
+    char *tmp = malloc(len);
+    if (!tmp) {
+        fprintf(stderr, "malloc() failed\n");
+        return 0;
+    }
 
     if (!send_ws_header(u, opcode, len)) {
+        free(tmp);
 	return 0;
     }
     ws_t *ws = u->ws;
@@ -945,8 +971,11 @@ static int tcp_write_ws(tcp_channel *u, uint8_t opcode, char *buf, size_t len)
 
     if (tcp_write_internal(u, tmp, len) != len) {
 	fprintf(stderr, "tcp_write()\n");
+        free(tmp);
 	return 0;
     }
+
+    free(tmp);
 
     return len;
 }
@@ -970,7 +999,11 @@ int tcp_read(tcp_channel *u, void *buf, size_t len)
 {
     int avail;
     ws_t *ws = NULL;
-    char *tmp = alloca(len);
+    char *tmp = malloc(len);
+    if (!tmp) {
+        fprintf(stderr, "malloc() failed\n");
+        return 0;
+    }
 
     if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
 	ws = u->ws;
@@ -1000,6 +1033,8 @@ int tcp_read(tcp_channel *u, void *buf, size_t len)
 
 	memcpy(buf, tmp, ret);
     }
+
+    free(tmp);
 
     return ret;
 }

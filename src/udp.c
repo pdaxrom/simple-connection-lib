@@ -71,6 +71,10 @@ udp_channel *udp_open(int mode, char *addr, int port)
 #endif
 
     udp_channel *u = (udp_channel *)malloc(sizeof(udp_channel));
+    if (!u) {
+        fprintf(stderr, "malloc() failed\n");
+        return NULL;
+    }
 
     u->mode = mode;
 
@@ -94,7 +98,20 @@ udp_channel *udp_open(int mode, char *addr, int port)
 	}
 
 	u->inp_addr = (struct sockaddr_in *) malloc(sizeof(struct sockaddr_in));
+	if (!u->inp_addr) {
+	    fprintf(stderr, "malloc() failed\n");
+	    closesocket(u->s);
+	    free(u);
+	    return NULL;
+	}
 	u->out_addr = (struct sockaddr_in *) malloc(sizeof(struct sockaddr_in));
+	if (!u->out_addr) {
+	    fprintf(stderr, "malloc() failed\n");
+	    closesocket(u->s);
+	    free(u->inp_addr);
+	    free(u);
+	    return NULL;
+	}
     } else {
 	u->inp_addr = NULL;
 	u->out_addr = NULL;
@@ -250,10 +267,16 @@ int udp_forward_add(udp_channel *u, char *label)
 
     fwd = (udp_forward *) malloc(sizeof(udp_forward));
     if (!fwd) {
+        fprintf(stderr, "malloc() failed\n");
 	return -1;
     }
     fwd->addr = *u->inp_addr;
     fwd->label = strdup(label);
+    if (!fwd->label) {
+        fprintf(stderr, "strdup() failed\n");
+        free(fwd);
+        return -1;
+    }
     fwd->used = 1;
     fwd->total = 0;
     fwd->next = NULL;

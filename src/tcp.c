@@ -49,6 +49,7 @@
 #include "tcp.h"
 #include "getrandom.h"
 #include "base64.h"
+#include "errors.h"
 
 static void tcp_report_error(tcp_channel *u, const char *format, ...)
 {
@@ -57,6 +58,25 @@ static void tcp_report_error(tcp_channel *u, const char *format, ...)
     if (u && u->error_callback) {
         char buffer[1024];
         vsnprintf(buffer, sizeof(buffer), format, args);
+        u->error_callback(buffer);
+    } else {
+        vfprintf(stderr, format, args);
+    }
+    va_end(args);
+}
+
+static void tcp_set_error(tcp_channel *u, int error_code, const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+
+    /* Set the global error information */
+    char buffer[1024];
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    simple_connection_set_error(error_code, errno, __func__, __LINE__, "%s", buffer);
+
+    /* Also call the error callback for backward compatibility */
+    if (u && u->error_callback) {
         u->error_callback(buffer);
     } else {
         vfprintf(stderr, format, args);
@@ -328,13 +348,13 @@ static tcp_channel *tcp_open_server(int mode, uint16_t port, char *sslkeyfile, c
     char port_str[6];
     snprintf(port_str, sizeof(port_str), "%d", port);
     if (getaddrinfo(NULL, port_str, &hints, &res) != 0) {
-        tcp_report_error(u, "getaddrinfo() failed\n");
+        tcp_set_error(u, SIMPLE_CONNECTION_ERROR_GETADDRINFO, "getaddrinfo() failed\n");
         free(u);
         return NULL;
     }
 
     if ((u->s = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
-        tcp_report_error(u, "socket() error!\n");
+        tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SOCKET, "socket() error!\n");
         freeaddrinfo(res);
         free(u);
         return NULL;
@@ -361,21 +381,21 @@ static tcp_channel *tcp_open_server(int mode, uint16_t port, char *sslkeyfile, c
 
     int yes = 1;
     if(setsockopt(u->s, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(int)) == -1) {
-        tcp_report_error(u, "setsockopt() error!\n");
+        tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SETSOCKOPT, "setsockopt() error!\n");
         closesocket(u->s);
         free(u);
         return NULL;
     }
 
     if(bind(u->s, (struct sockaddr *)&u->my_addr, u->addrlen) == -1) {
-        tcp_report_error(u, "bind() error!\n");
+        tcp_set_error(u, SIMPLE_CONNECTION_ERROR_BIND, "bind() error!\n");
         closesocket(u->s);
         free(u);
         return NULL;
     }
 
     if (listen(u->s, 10) == -1) {
-        tcp_report_error(u, "listen() error!\n");
+        tcp_set_error(u, SIMPLE_CONNECTION_ERROR_LISTEN, "listen() error!\n");
         closesocket(u->s);
         free(u);
         return NULL;
@@ -459,7 +479,7 @@ static tcp_channel *tcp_open_client(int mode, const char *addr, uint16_t port)
 #endif
 
     if (connect(u->s, (struct sockaddr *)&u->my_addr, u->addrlen) == -1) {
-        tcp_report_error(u, "connect()\n");
+        tcp_set_error(u, SIMPLE_CONNECTION_ERROR_CONNECT, "connect()\n");
         closesocket(u->s);
         free(u);
         return NULL;
@@ -582,9 +602,9 @@ tcp_channel *tcp_accept(tcp_channel *u)
 
     socklen_t l = sizeof(n->my_addr);
     if ((n->s = accept(u->s, (struct sockaddr *)&n->my_addr, &l)) < 0) {
-  	tcp_report_error(u, "accept()\n");
-  	free(n);
-  	return NULL;
+   	tcp_set_error(u, SIMPLE_CONNECTION_ERROR_ACCEPT, "accept()\n");
+   	free(n);
+   	return NULL;
     }
     n->addrlen = l;
 
@@ -619,15 +639,15 @@ static int tcp_read_internal(tcp_channel *u, char *buf, size_t len)
 
 #ifdef ENABLE_SSL
     if ((u->mode == TCP_SSL_CLIENT) || (u->mode == TCP_SSL_SERVER)) {
-	if ((r = SSL_read(u->ssl, buf, len)) < 0) {
-	    tcp_report_error(u, "SSL_read()\n");
-	}
+ 	if ((r = SSL_read(u->ssl, buf, len)) < 0) {
+ 	    tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SSL_READ, "SSL_read()\n");
+ 	}
     } else
 #endif
     {
-	if ((r = recv(u->s, buf, len, 0)) == -1) {
-	    tcp_report_error(u, "recvfrom()\n");
-	}
+ 	if ((r = recv(u->s, buf, len, 0)) == -1) {
+ 	    tcp_set_error(u, SIMPLE_CONNECTION_ERROR_RECV, "recvfrom()\n");
+ 	}
     }
 
     return r;
@@ -638,15 +658,15 @@ static int tcp_write_internal(tcp_channel *u, char *buf, size_t len)
     int r;
 #ifdef ENABLE_SSL
     if ((u->mode == TCP_SSL_CLIENT) || (u->mode == TCP_SSL_SERVER)) {
-	if ((r = SSL_write(u->ssl, buf, len)) < 0) {
-	    tcp_report_error(u, "SSL_write()\n");
-	}
+ 	if ((r = SSL_write(u->ssl, buf, len)) < 0) {
+ 	    tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SSL_WRITE, "SSL_write()\n");
+ 	}
     } else
 #endif
     {
-	if ((r = send(u->s, buf, len, 0)) < 0) {
-	    tcp_report_error(u, "sendto()\n");
-	}
+ 	if ((r = send(u->s, buf, len, 0)) < 0) {
+ 	    tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SEND, "sendto()\n");
+ 	}
     }
 
     return r;
@@ -1272,4 +1292,20 @@ void tcp_set_error_callback(tcp_channel *u, tcp_error_callback cb)
     if (u) {
         u->error_callback = cb;
     }
+}
+
+/* Error handling functions */
+int tcp_get_last_error(void)
+{
+    return simple_connection_get_last_error();
+}
+
+int tcp_get_last_errno(void)
+{
+    return simple_connection_get_last_errno();
+}
+
+const char *tcp_get_last_error_message(void)
+{
+    return simple_connection_get_last_error_message();
 }

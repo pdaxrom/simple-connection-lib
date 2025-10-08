@@ -39,6 +39,8 @@
 #endif
 #include <inttypes.h>
 
+#include "errors.h"
+
 enum {
     UDP_SERVER = 0,
     UDP_CLIENT
@@ -87,6 +89,11 @@ int udp_forward_write(udp_channel *u, char *label, void *buf, size_t len);
 void udp_forward_show(udp_channel *u);
 void udp_forward_remove_inactive(udp_channel *u);
 void udp_set_error_callback(udp_channel *u, udp_error_callback cb);
+
+/* Error handling functions */
+int udp_get_last_error(void);
+int udp_get_last_errno(void);
+const char *udp_get_last_error_message(void);
 
 #ifdef __cplusplus
 }

@@ -44,6 +44,7 @@
 #define PORT 9930
 
 #include "udp.h"
+#include "errors.h"
 
 static void udp_report_error(udp_channel *u, const char *format, ...)
 {
@@ -52,6 +53,25 @@ static void udp_report_error(udp_channel *u, const char *format, ...)
     if (u && u->error_callback) {
         char buffer[1024];
         vsnprintf(buffer, sizeof(buffer), format, args);
+        u->error_callback(buffer);
+    } else {
+        vfprintf(stderr, format, args);
+    }
+    va_end(args);
+}
+
+static void udp_set_error(udp_channel *u, int error_code, const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+
+    /* Set the global error information */
+    char buffer[1024];
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    simple_connection_set_error(error_code, errno, __func__, __LINE__, "%s", buffer);
+
+    /* Also call the error callback for backward compatibility */
+    if (u && u->error_callback) {
         u->error_callback(buffer);
     } else {
         vfprintf(stderr, format, args);
@@ -132,7 +152,7 @@ static udp_channel *udp_open_server(uint16_t port)
 #endif
 
     if (bind(u->s, (struct sockaddr* ) &u->my_addr, u->my_addrlen) == -1) {
-        udp_report_error(u, "bind() failed\n");
+        udp_set_error(u, SIMPLE_CONNECTION_ERROR_BIND, "bind() failed\n");
         closesocket(u->s);
         free(u);
         return NULL;
@@ -287,15 +307,15 @@ int udp_read(udp_channel *u, void *buf, size_t len)
 
     if (u->mode == UDP_SERVER) {
         if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)u->inp_addr, &slen)) == -1) {
-    	    udp_report_error(u, "recvfrom()\n");
-	}
-	*u->out_addr = *u->inp_addr;
-	u->out_addrlen = slen;
+     	    udp_set_error(u, SIMPLE_CONNECTION_ERROR_RECVFROM, "recvfrom()\n");
+ 	}
+ 	*u->out_addr = *u->inp_addr;
+ 	u->out_addrlen = slen;
     } else {
         slen = u->my_addrlen;
         if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, &slen))==-1) {
-	    udp_report_error(u, "recvfrom()\n");
-	}
+ 	    udp_set_error(u, SIMPLE_CONNECTION_ERROR_RECVFROM, "recvfrom()\n");
+ 	}
     }
 
     return r;
@@ -308,14 +328,14 @@ int udp_write(udp_channel *u, void *buf, size_t len)
 
     if (u->mode == UDP_SERVER) {
         slen = u->out_addrlen;
-	if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)u->out_addr, slen)) < 0) {
-	    udp_report_error(u, "sendto()\n");
-	}
+ 	if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)u->out_addr, slen)) < 0) {
+ 	    udp_set_error(u, SIMPLE_CONNECTION_ERROR_SENDTO, "sendto()\n");
+ 	}
     } else {
         slen = u->my_addrlen;
-	if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, slen)) == -1) {
-	    udp_report_error(u, "sendto()\n");
-	}
+ 	if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, slen)) == -1) {
+ 	    udp_set_error(u, SIMPLE_CONNECTION_ERROR_SENDTO, "sendto()\n");
+ 	}
     }
 
     return r;
@@ -476,4 +496,20 @@ void udp_set_error_callback(udp_channel *u, udp_error_callback cb)
     if (u) {
         u->error_callback = cb;
     }
+}
+
+/* Error handling functions */
+int udp_get_last_error(void)
+{
+    return simple_connection_get_last_error();
+}
+
+int udp_get_last_errno(void)
+{
+    return simple_connection_get_last_errno();
+}
+
+const char *udp_get_last_error_message(void)
+{
+    return simple_connection_get_last_error_message();
 }

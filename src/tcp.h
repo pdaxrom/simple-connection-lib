@@ -42,6 +42,8 @@
 #include <openssl/err.h>
 #endif
 
+#include "errors.h"
+
 enum {
     TCP_SERVER = 0,
     TCP_SSL_SERVER,
@@ -93,6 +95,11 @@ int tcp_ping(tcp_channel *u, void *buf, size_t len);
 int tcp_pong(tcp_channel *u, void *buf, size_t len);
 int tcp_close(tcp_channel *u);
 void tcp_set_error_callback(tcp_channel *u, tcp_error_callback cb);
+
+/* Error handling functions */
+int tcp_get_last_error(void);
+int tcp_get_last_errno(void);
+const char *tcp_get_last_error_message(void);
 
 #ifdef __cplusplus
 }

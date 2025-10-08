@@ -28,24 +28,8 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <unistd.h>
-#ifndef _WIN32
-#include <netdb.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#define closesocket close
-#else
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#include <windows.h>
-#include <shlwapi.h>
-#define strcasestr StrStrIA
-#endif
 
-#define PORT 9930
-
+#include "platform.h"
 #include "tcp.h"
 #include "getrandom.h"
 #include "base64.h"
@@ -72,58 +56,9 @@ static void tcp_set_error(tcp_channel *u, int error_code, const char *format, ..
     va_end(args);
 }
 
-#if defined(__APPLE__) 
+#if defined(__APPLE__)
 
-#include <libkern/OSByteOrder.h>
-#define WS_NTOH64(n) OSSwapBigToHostInt64(n)
-#define WS_NTOH32(n) OSSwapBigToHostInt32(n)
-#define WS_NTOH16(n) OSSwapBigToHostInt16(n)
-#define WS_HTON64(n) OSSwapHostToBigInt64(n)
-#define WS_HTON16(n) OSSwapHostToBigInt16(n)
 
-#else
-
-#if defined(_WIN32)
-
-#include <windows.h>
-
-#define htobe16(x) __builtin_bswap16(x)
-#define htole16(x) (x)
-#define be16toh(x) __builtin_bswap16(x)
-#define le16toh(x) (x)
-
-#define htobe32(x) __builtin_bswap32(x)
-#define htole32(x) (x)
-#define be32toh(x) __builtin_bswap32(x)
-#define le32toh(x) (x)
-
-#define htobe64(x) __builtin_bswap64(x)
-#define htole64(x) (x)
-#define be64toh(x) __builtin_bswap64(x)
-#define le64toh(x) (x)
-
-#define ntobe64(x) __builtin_bswap64(x)
-#define ntobe16(x) ntohs(x)
-#endif
-
-#ifdef sgi
-#include <ctype.h>
-#include <alloca.h>
-
-typedef int socklen_t;
-
-#define htobe64 htonll
-#define htobe16 htons
-#define ntobe64 ntohll
-#define ntobe16 ntohs
-
-#endif
-
-#define WS_NTOH64(n) ntobe64(n)
-#define WS_NTOH32(n) ntobe32(n)
-#define WS_NTOH16(n) ntobe16(n)
-#define WS_HTON64(n) htobe64(n)
-#define WS_HTON16(n) htobe16(n)
 
 #endif
 
@@ -189,67 +124,9 @@ static const char *SSL_CIPHER_LIST = "ALL:!LOW";
 
 #ifdef _WIN32
 typedef int socklen_t;
-
-static int winsock_inited = 0;
-static int winsock_init(void)
-{
-    WSADATA w;
-
-    if (winsock_inited)
-	return 0;
-
-    if (WSAStartup(0x0101, &w) != 0) {
-	fprintf(stderr, "Could not open Windows connection.\n");
-	return -1;
-    }
-    
-    winsock_inited = 1;
-    return 0;
-}
 #endif
 
-#ifdef sgi
-static uint64_t htonll(uint64_t host_value)
-{
-    uint64_t result = 0;
-    uint8_t *src = (uint8_t *)&host_value;
-    uint8_t *dst = (uint8_t *)&result;
 
-    for (int i = 0; i < 8; i++) {
-        dst[i] = src[7 - i];
-    }
-
-    return result;
-}
-
-static uint64_t ntohll(uint64_t net_value)
-{
-    return htonll(net_value);
-}
-
-static char *strcasestr(const char *haystack, const char *needle)
-{
-    if (!*needle) {
-        return (char *)haystack;
-    }
-
-    for (; *haystack; haystack++) {
-        const char *h = haystack;
-        const char *n = needle;
-
-        while (*h && *n && (tolower((unsigned char)*h) == tolower((unsigned char)*n))) {
-            h++;
-            n++;
-        }
-
-        if (!*n) {
-            return (char *)haystack;
-        }
-    }
-
-    return NULL;
-}
-#endif
 
 #ifdef ENABLE_SSL
 static SSL_CTX *ssl_initialize(tcp_channel *channel, char *sslkeyfile, char *sslcertfile)
@@ -556,9 +433,8 @@ tcp_channel *tcp_open(int mode, const char *addr, uint16_t port, char *sslkeyfil
     }
 
 #ifdef _WIN32
-    if (winsock_init()) {
+    if (simple_connection_winsock_init())
 	return NULL;
-    }
 #endif
 
     if ((mode == TCP_SERVER) || (mode == TCP_SSL_SERVER)) {
@@ -862,13 +738,8 @@ static int http_ws_method_server(tcp_channel *channel, char *request, size_t len
     char *key_b64 = (char *)simple_connection_base64_encode((const unsigned char *)field, strlen(field), NULL);
 #endif
 
-#ifdef sgi
-    sprintf(req, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\nSec-WebSocket-Protocol: binary\r\n\r\n",
-	    key_b64);
-#else
     snprintf(req, sizeof(req), "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\nSec-WebSocket-Protocol: binary\r\n\r\n",
 	    key_b64);
-#endif
 
     free(key_b64);
 
@@ -895,13 +766,8 @@ static int http_ws_method_client(tcp_channel *channel)
 
     char *key_b64 = (char *)simple_connection_base64_encode((const unsigned char *)key, WS_KEY_LEN, NULL);
 
-#ifdef sgi
-    sprintf(req, "GET %s HTTP/1.1\r\nHost: %s\r\nSec-WebSocket-Version: 13\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Protocol: binary\r\n\r\n",
-	    channel->path ? channel->path : "/", channel->host, key_b64);
-#else
     snprintf(req, sizeof(req), "GET %s HTTP/1.1\r\nHost: %s\r\nSec-WebSocket-Version: 13\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Protocol: binary\r\n\r\n",
 	    channel->path ? channel->path : "/", channel->host, key_b64);
-#endif
 
     free(key_b64);
 

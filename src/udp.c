@@ -28,21 +28,8 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <unistd.h>
-#ifndef _WIN32
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <netdb.h>
-#define closesocket close
-#else
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#endif
 
-#define PORT 9930
-
+#include "platform.h"
 #include "udp.h"
 #include "errors.h"
 
@@ -69,23 +56,6 @@ static void udp_set_error(udp_channel *u, int error_code, const char *format, ..
 
 #ifdef _WIN32
 typedef int socklen_t;
-
-static int winsock_inited = 0;
-static int winsock_init(void)
-{
-    WSADATA w;
-
-    if (winsock_inited)
-	return 0;
-
-    if (WSAStartup(0x0101, &w) != 0) {
-	fprintf(stderr, "Could not open Windows connection.\n");
-	return -1;
-    }
-    
-    winsock_inited = 1;
-    return 0;
-}
 #endif
 
 static udp_channel *udp_open_server(uint16_t port)
@@ -252,7 +222,7 @@ udp_channel *udp_open(int mode, char *addr, uint16_t port)
     }
 
 #ifdef _WIN32
-    if (winsock_init())
+    if (simple_connection_winsock_init())
 	return NULL;
 #endif
 

@@ -25,6 +25,8 @@
 #ifndef TCP_H
 #define TCP_H
 
+#include <stdint.h>
+
 #ifndef _WIN32
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -80,7 +82,7 @@ typedef struct _tcp_channel {
 extern "C" {
 #endif
 
-tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, char *sslcertfile);
+tcp_channel *tcp_open(int mode, const char *addr, uint16_t port, char *sslkeyfile, char *sslcertfile);
 tcp_channel *tcp_accept(tcp_channel *u);
 int tcp_connection_upgrade(tcp_channel *u, int connection_method, const char *path, char *request, size_t len);
 int tcp_read(tcp_channel *u, void *buf, size_t len);

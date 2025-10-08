@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <unistd.h>
 #ifndef _WIN32
 #include <arpa/inet.h>
@@ -77,7 +78,7 @@ static int winsock_init(void)
 }
 #endif
 
-static udp_channel *udp_open_server(int port)
+static udp_channel *udp_open_server(uint16_t port)
 {
     udp_channel *u = (udp_channel *)malloc(sizeof(udp_channel));
     if (!u) {
@@ -126,7 +127,7 @@ static udp_channel *udp_open_server(int port)
     return u;
 }
 
-static udp_channel *udp_open_client(char *addr, int port)
+static udp_channel *udp_open_client(char *addr, uint16_t port)
 {
     udp_channel *u = (udp_channel *)malloc(sizeof(udp_channel));
     if (!u) {
@@ -165,8 +166,19 @@ static udp_channel *udp_open_client(char *addr, int port)
     return u;
 }
 
-udp_channel *udp_open(int mode, char *addr, int port)
+udp_channel *udp_open(int mode, char *addr, uint16_t port)
 {
+    // Input validation
+    if (port == 0) {
+        return NULL;
+    }
+
+    if (mode == UDP_CLIENT) {
+        if (!addr) {
+            return NULL;
+        }
+    }
+
 #ifdef _WIN32
     if (winsock_init())
 	return NULL;

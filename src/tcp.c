@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <unistd.h>
 #ifndef _WIN32
 #include <netdb.h>
@@ -300,7 +301,7 @@ static void ssl_tear_down(SSL_CTX *ctx)
 }
 #endif
 
-static tcp_channel *tcp_open_server(int mode, int port, char *sslkeyfile, char *sslcertfile)
+static tcp_channel *tcp_open_server(int mode, uint16_t port, char *sslkeyfile, char *sslcertfile)
 {
     tcp_channel *u = (tcp_channel *)malloc(sizeof(tcp_channel));
     if (!u) {
@@ -361,7 +362,7 @@ static tcp_channel *tcp_open_server(int mode, int port, char *sslkeyfile, char *
     return u;
 }
 
-static tcp_channel *tcp_open_client(int mode, const char *addr, int port)
+static tcp_channel *tcp_open_client(int mode, const char *addr, uint16_t port)
 {
     tcp_channel *u = (tcp_channel *)malloc(sizeof(tcp_channel));
     if (!u) {
@@ -426,8 +427,25 @@ static tcp_channel *tcp_open_client(int mode, const char *addr, int port)
     return u;
 }
 
-tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, char *sslcertfile)
+tcp_channel *tcp_open(int mode, const char *addr, uint16_t port, char *sslkeyfile, char *sslcertfile)
 {
+    // Input validation
+    if (port == 0) {
+        return NULL;
+    }
+
+    if ((mode == TCP_CLIENT) || (mode == TCP_SSL_CLIENT)) {
+        if (!addr) {
+            return NULL;
+        }
+    }
+
+    if ((mode == TCP_SSL_SERVER) || (mode == TCP_SSL_CLIENT)) {
+        if (!sslkeyfile || !sslcertfile) {
+            return NULL;
+        }
+    }
+
 #ifdef _WIN32
     if (winsock_init()) {
 	return NULL;

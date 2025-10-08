@@ -25,6 +25,8 @@
 #ifndef UDP_H
 #define UDP_H
 
+#include <stdint.h>
+
 #ifndef _WIN32
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -67,7 +69,7 @@ typedef struct _udp_channel {
 extern "C" {
 #endif
 
-udp_channel *udp_open(int mode, char *addr, int port);
+udp_channel *udp_open(int mode, char *addr, uint16_t port);
 int udp_read(udp_channel *u, void *buf, size_t len);
 int udp_write(udp_channel *u, void *buf, size_t len);
 int udp_close(udp_channel *u);

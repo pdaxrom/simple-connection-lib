@@ -398,7 +398,7 @@ tcp_channel *tcp_open(int mode, const char *addr, int port, char *sslkeyfile, ch
 	}
     }
 
-    u->host = (char *)addr;
+    u->host = addr;
 
     return u;
 }
@@ -777,7 +777,7 @@ int tcp_connection_upgrade(tcp_channel *u, int connection_method, const char *pa
 	}
 	ws->avail = 0;
 	ws->pos = 0;
-	u->path = (char *)path;
+    u->path = path;
 	if ((u->primary_mode == TCP_SSL_CLIENT) || (u->primary_mode == TCP_CLIENT)) {
 	    if (http_ws_method_client(u)) {
 		u->connection_method = connection_method;

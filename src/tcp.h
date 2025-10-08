@@ -61,8 +61,8 @@ typedef struct _tcp_channel {
     SSL *ssl;
     SSL_CTX *ctx;
 #endif
-    char *host;
-    char *path;
+    const char *host;
+    const char *path;
     char *ws_path;
     int connection_method;
     /* ws socket mode */

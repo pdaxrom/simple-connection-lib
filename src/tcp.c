@@ -253,7 +253,7 @@ static SSL_CTX *ssl_initialize(tcp_channel *channel, char *sslkeyfile, char *ssl
 
     if ((ssl_context = SSL_CTX_new(TLS_server_method())) == NULL) {
 	tcp_report_error(channel, "Failed to initialize SSL context.\n");
-	return NULL;
+	goto error1;
     }
 
     SSL_CTX_set_options(ssl_context, SSL_OP_ALL | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
@@ -275,7 +275,9 @@ static SSL_CTX *ssl_initialize(tcp_channel *channel, char *sslkeyfile, char *ssl
 
     return ssl_context;
  error1:
-    SSL_CTX_free(ssl_context);
+    if (ssl_context) {
+        SSL_CTX_free(ssl_context);
+    }
     return NULL;
 }
 

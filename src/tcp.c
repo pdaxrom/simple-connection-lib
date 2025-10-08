@@ -463,7 +463,7 @@ static int tcp_write_ws(tcp_channel *u, uint8_t opcode, char *buf, size_t len);
 
 int tcp_close(tcp_channel *u)
 {
-    if (u->s >= 0) {
+    if (u->s != -1) {
 	if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
 	    char buf[] = { 0, 0, 'C', 'l', 'o', 's', 'e', 'd' };
 	    *((unsigned short *)buf) = htons(1000);

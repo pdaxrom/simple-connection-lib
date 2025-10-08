@@ -34,6 +34,8 @@ unsigned char *simple_connection_base64_encode(const unsigned char *src, size_t 
 	size_t olen;
 	int line_len;
 
+	if (len > SIZE_MAX / 4)
+		return NULL; /* prevent overflow */
 	olen = len * 4 / 3 + 4; /* 3-byte blocks to 4-byte */
 	olen += olen / 72; /* line feeds */
 	olen++; /* nul termination */

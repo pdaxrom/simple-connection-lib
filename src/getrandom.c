@@ -23,6 +23,7 @@
  */
 
 #include <stdio.h>
+#include <errno.h>
 #ifdef __linux__
 #include <unistd.h>
 #include <sys/syscall.h>

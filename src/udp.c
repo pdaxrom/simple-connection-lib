@@ -208,7 +208,7 @@ int udp_close(udp_channel *u)
     if (u->out_addr) {
 	free(u->out_addr);
     }
-    if (u->s >=0) {
+    if (u->s != -1) {
 	closesocket(u->s);
     }
     free(u);

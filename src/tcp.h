@@ -52,6 +52,8 @@ enum {
     SIMPLE_CONNECTION_METHOD_WS
 };
 
+typedef void (*tcp_error_callback)(const char *message);
+
 typedef struct _tcp_channel {
     int s;
     struct sockaddr_in my_addr;
@@ -67,6 +69,7 @@ typedef struct _tcp_channel {
     int connection_method;
     /* ws socket mode */
     void *ws;
+    tcp_error_callback error_callback;
 } tcp_channel;
 
 #define tcp_fd(u) (u->s)

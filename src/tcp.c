@@ -25,6 +25,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include <unistd.h>
 #ifndef _WIN32
 #include <netdb.h>
@@ -45,6 +46,20 @@
 #include "tcp.h"
 #include "getrandom.h"
 #include "base64.h"
+
+static void tcp_report_error(tcp_channel *u, const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    if (u && u->error_callback) {
+        char buffer[1024];
+        vsnprintf(buffer, sizeof(buffer), format, args);
+        u->error_callback(buffer);
+    } else {
+        vfprintf(stderr, format, args);
+    }
+    va_end(args);
+}
 
 #if defined(__APPLE__) 
 
@@ -171,7 +186,7 @@ static int winsock_init(void)
 	return 0;
 
     if (WSAStartup(0x0101, &w) != 0) {
-	fprintf(stderr, "Could not open Windows connection.\n");
+	tcp_report_error(channel, "Could not open Windows connection.\n");
 	return -1;
     }
     
@@ -224,7 +239,7 @@ static char *strcasestr(const char *haystack, const char *needle)
 #endif
 
 #ifdef ENABLE_SSL
-static SSL_CTX *ssl_initialize(char *sslkeyfile, char *sslcertfile)
+static SSL_CTX *ssl_initialize(tcp_channel *channel, char *sslkeyfile, char *sslcertfile)
 {
     SSL_CTX *ssl_context;
 
@@ -232,24 +247,24 @@ static SSL_CTX *ssl_initialize(char *sslkeyfile, char *sslcertfile)
     SSL_load_error_strings();
 
     if ((ssl_context = SSL_CTX_new(TLS_server_method())) == NULL) {
-	fprintf(stderr, "Failed to initialize SSL context.\n");
+	tcp_report_error(channel, "Failed to initialize SSL context.\n");
 	return NULL;
     }
 
     SSL_CTX_set_options(ssl_context, SSL_OP_ALL | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
 
     if (!SSL_CTX_set_cipher_list(ssl_context, SSL_CIPHER_LIST)) {
-	fprintf(stderr, "Failed to set SSL cipher list.\n");
+	tcp_report_error(channel, "Failed to set SSL cipher list.\n");
 	goto error1;
     }
 
     if (SSL_CTX_use_PrivateKey_file(ssl_context, sslkeyfile, SSL_FILETYPE_PEM) <= 0) {
-	fprintf(stderr, "Failed to load private key file.\n");
+	tcp_report_error(channel, "Failed to load private key file.\n");
 	goto error1;
     }
 
     if (SSL_CTX_use_certificate_file(ssl_context, sslcertfile, SSL_FILETYPE_PEM) <= 0) {
-	fprintf(stderr, "Failed to load certificate key file.\n");
+	tcp_report_error(channel, "Failed to load certificate key file.\n");
 	goto error1;
     }
 
@@ -287,16 +302,17 @@ static tcp_channel *tcp_open_server(int mode, int port, char *sslkeyfile, char *
 {
     tcp_channel *u = (tcp_channel *)malloc(sizeof(tcp_channel));
     if (!u) {
-        fprintf(stderr, "malloc() failed\n");
+        fprintf(stderr, "malloc() failed %s(%d)\n", __func__, __LINE__);
         return NULL;
     }
     memset(u, 0, sizeof(tcp_channel));
+    u->error_callback = NULL;
 
     u->mode = mode;
     u->primary_mode = mode;
 
     if ((u->s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
-        fprintf(stderr, "socket() error!\n");
+        tcp_report_error(u, "socket() error!\n");
         free(u);
         return NULL;
     }
@@ -304,7 +320,7 @@ static tcp_channel *tcp_open_server(int mode, int port, char *sslkeyfile, char *
 #ifndef _WIN32
     int yes = 1;
     if(setsockopt(u->s, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
-        fprintf(stderr, "setsockopt() error!\n");
+        tcp_report_error(u, "setsockopt() error!\n");
         free(u);
         return NULL;
     }
@@ -316,14 +332,14 @@ static tcp_channel *tcp_open_server(int mode, int port, char *sslkeyfile, char *
     u->my_addr.sin_port = htons(port);
 
     if(bind(u->s, (struct sockaddr *)&u->my_addr, sizeof(u->my_addr)) == -1) {
-        fprintf(stderr, "bind() error!\n");
+        tcp_report_error(u, "bind() error!\n");
         closesocket(u->s);
         free(u);
         return NULL;
     }
 
     if (listen(u->s, 10) == -1) {
-        fprintf(stderr, "listen() error!\n");
+        tcp_report_error(u, "listen() error!\n");
         closesocket(u->s);
         free(u);
         return NULL;
@@ -331,9 +347,9 @@ static tcp_channel *tcp_open_server(int mode, int port, char *sslkeyfile, char *
 
     if (mode == TCP_SSL_SERVER) {
 #ifdef ENABLE_SSL
-        u->ctx = ssl_initialize(sslkeyfile, sslcertfile);
+        u->ctx = ssl_initialize(u, sslkeyfile, sslcertfile);
 #else
-        fprintf(stderr, "ssl support missed in this configuration!\n");
+        tcp_report_error(u, "ssl support missed in this configuration!\n");
         closesocket(u->s);
         free(u);
         return NULL;
@@ -347,23 +363,24 @@ static tcp_channel *tcp_open_client(int mode, const char *addr, int port)
 {
     tcp_channel *u = (tcp_channel *)malloc(sizeof(tcp_channel));
     if (!u) {
-        fprintf(stderr, "malloc() failed\n");
+        fprintf(stderr, "malloc() failed %s(%d)\n", __func__, __LINE__);
         return NULL;
     }
     memset(u, 0, sizeof(tcp_channel));
+    u->error_callback = NULL;
 
     u->mode = mode;
     u->primary_mode = mode;
 
     if ((u->s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
-        fprintf(stderr, "socket() error!\n");
+        tcp_report_error(u, "socket() error!\n");
         free(u);
         return NULL;
     }
 
     struct hostent *server = gethostbyname(addr);
     if (server == NULL) {
-        fprintf(stderr, "gethostbyname() no such host\n");
+        tcp_report_error(u, "gethostbyname() no such host\n");
         free(u);
         return NULL;
     }
@@ -374,7 +391,7 @@ static tcp_channel *tcp_open_client(int mode, const char *addr, int port)
     u->my_addr.sin_port = htons(port);
 
     if (connect(u->s, (struct sockaddr *)&u->my_addr, sizeof(struct sockaddr)) == -1) {
-        fprintf(stderr, "connect()\n");
+        tcp_report_error(u, "connect()\n");
         closesocket(u->s);
         free(u);
         return NULL;
@@ -388,14 +405,14 @@ static tcp_channel *tcp_open_client(int mode, const char *addr, int port)
         SSL_set_fd(u->ssl, u->s);
         int retval;
         if ((retval = SSL_connect(u->ssl)) < 0) {
-            fprintf(stderr, "SSL_connect(): %d\n", SSL_get_error(u->ssl, retval));
+            tcp_report_error(u, "SSL_connect(): %d\n", SSL_get_error(u->ssl, retval));
             SSL_free(u->ssl);
             ssl_tear_down(u->ctx);
             free(u);
             return NULL;
         }
 #else
-        fprintf(stderr, "ssl support missed in this configuration!\n");
+        tcp_report_error(u, "ssl support missed in this configuration!\n");
         closesocket(u->s);
         free(u);
         return NULL;
@@ -464,10 +481,11 @@ tcp_channel *tcp_accept(tcp_channel *u)
 {
     tcp_channel *n = (tcp_channel *)malloc(sizeof(tcp_channel));
     if (!n) {
-        fprintf(stderr, "malloc() failed\n");
+        tcp_report_error(u, "malloc() failed\n");
         return NULL;
     }
     memset(n, 0, sizeof(tcp_channel));
+    n->error_callback = u->error_callback;
 
     if (u->mode == TCP_SSL_SERVER) {
 	n->mode = TCP_SSL_CLIENT;
@@ -479,30 +497,30 @@ tcp_channel *tcp_accept(tcp_channel *u)
 
     socklen_t l = sizeof(struct sockaddr);
     if ((n->s = accept(u->s, (struct sockaddr *)&n->my_addr, &l)) < 0) {
-	fprintf(stderr, "accept()\n");
-	free(n);
-	return NULL;
+ 	tcp_report_error(u, "accept()\n");
+ 	free(n);
+ 	return NULL;
     }
 
 #ifdef ENABLE_SSL
     if (u->mode == TCP_SSL_SERVER) {
-	if ((n->ssl = SSL_new(u->ctx)) == NULL) {
-	    fprintf(stderr, "Failed to create SSL connection.\n");
-	    closesocket(n->s);
-	    free(n);
-	    return NULL;
-	}
+ 	if ((n->ssl = SSL_new(u->ctx)) == NULL) {
+ 	    tcp_report_error(u, "Failed to create SSL connection.\n");
+ 	    closesocket(n->s);
+ 	    free(n);
+ 	    return NULL;
+ 	}
 
 	SSL_set_fd(n->ssl, n->s);
 
-	if (SSL_accept(n->ssl) < 0) {
-	    fprintf(stderr, "Unable to accept SSL connection.\n");
-	    ERR_print_errors_fp(stderr);
-	    SSL_free(n->ssl);
-	    closesocket(n->s);
-	    free(n);
-	    return NULL;
-	}
+ 	if (SSL_accept(n->ssl) < 0) {
+ 	    tcp_report_error(u, "Unable to accept SSL connection.\n");
+ 	    ERR_print_errors_fp(stderr);
+ 	    SSL_free(n->ssl);
+ 	    closesocket(n->s);
+ 	    free(n);
+ 	    return NULL;
+ 	}
     }
 #endif
 
@@ -516,13 +534,13 @@ static int tcp_read_internal(tcp_channel *u, char *buf, size_t len)
 #ifdef ENABLE_SSL
     if ((u->mode == TCP_SSL_CLIENT) || (u->mode == TCP_SSL_SERVER)) {
 	if ((r = SSL_read(u->ssl, buf, len)) < 0) {
-	    fprintf(stderr, "SSL_read()\n");
+	    tcp_report_error(u, "SSL_read()\n");
 	}
     } else
 #endif
     {
 	if ((r = recv(u->s, buf, len, 0)) == -1) {
-	    fprintf(stderr, "recvfrom()\n");
+	    tcp_report_error(u, "recvfrom()\n");
 	}
     }
 
@@ -535,13 +553,13 @@ static int tcp_write_internal(tcp_channel *u, char *buf, size_t len)
 #ifdef ENABLE_SSL
     if ((u->mode == TCP_SSL_CLIENT) || (u->mode == TCP_SSL_SERVER)) {
 	if ((r = SSL_write(u->ssl, buf, len)) < 0) {
-	    fprintf(stderr, "SSL_write()\n");
+	    tcp_report_error(u, "SSL_write()\n");
 	}
     } else
 #endif
     {
 	if ((r = send(u->s, buf, len, 0)) < 0) {
-	    fprintf(stderr, "sendto()\n");
+	    tcp_report_error(u, "sendto()\n");
 	}
     }
 
@@ -580,13 +598,13 @@ static int get_http_header(tcp_channel *channel, char *head, int headLen)
     return totalRead;
 }
 
-static char *copy_string(char *dst, int dstSize, char *src, int srcSize)
+static char *copy_string(tcp_channel *u, char *dst, int dstSize, char *src, int srcSize)
 {
     if (!dst) {
 	dstSize = srcSize;
 	dst = malloc(dstSize + 1);
 	if (!dst) {
-	    fprintf(stderr, "malloc() failed\n");
+	    tcp_report_error(u, "malloc() failed\n");
 	    return NULL;
 	}
     } else {
@@ -597,7 +615,7 @@ static char *copy_string(char *dst, int dstSize, char *src, int srcSize)
     return dst;
 }
 
-static char *header_get_field(char *header, char *field, char *str, int n)
+static char *header_get_field(tcp_channel *channel, char *header, char *field, char *str, int n)
 {
     while (*header) {
 	if (strcasestr(header, field) == header && *(header + strlen(field)) == ':') {
@@ -605,7 +623,7 @@ static char *header_get_field(char *header, char *field, char *str, int n)
 	    for (tmp1++; *tmp1 == ' '; tmp1++) ;
 	    char *tmp;
 	    for (tmp = tmp1; *tmp != 0 && *tmp != '\n' && *tmp != '\r'; tmp++) ;
-	    return copy_string(str, n, tmp1, tmp - tmp1);
+	    return copy_string(channel, str, n, tmp1, tmp - tmp1);
 	}
 
 	while (*header && *header != '\r' && *header != '\n') {
@@ -618,13 +636,13 @@ static char *header_get_field(char *header, char *field, char *str, int n)
     return NULL;
 }
 
-static char *header_get_path(char *header, char *str, int n)
+static char *header_get_path(tcp_channel *channel, char *header, char *str, int n)
 {
     char *tmp = strchr(header, ' ');
     if (tmp) {
 	char *tmp1 = strchr(tmp + 1, ' ');
 	if (tmp1) {
-	    return copy_string(str, n, tmp + 1, tmp1 - tmp - 1);
+	    return copy_string(channel, str, n, tmp + 1, tmp1 - tmp - 1);
 	}
     }
     if (str) {
@@ -652,7 +670,7 @@ static int http_ws_method_server(tcp_channel *channel, char *request, size_t len
     }
 
     if (get_http_header(channel, req, sizeof(req)) <= 0) {
-	fprintf(stderr, "%s: get_http_header()\n", __func__);
+	tcp_report_error(channel, "%s: get_http_header()\n", __func__);
 	return 0;
     }
 
@@ -660,7 +678,7 @@ static int http_ws_method_server(tcp_channel *channel, char *request, size_t len
 	strncpy(request, req, len);
     }
 
-    if (!header_get_field(req, "Upgrade", field, sizeof(field))) {
+    if (!header_get_field(channel, req, "Upgrade", field, sizeof(field))) {
 	return 0;
     }
 
@@ -668,33 +686,33 @@ static int http_ws_method_server(tcp_channel *channel, char *request, size_t len
 	return 0;
     }
 
-    if (!header_get_field(req, "Connection", field, sizeof(field))) {
+    if (!header_get_field(channel, req, "Connection", field, sizeof(field))) {
 	return 0;
     }
 
     if (!strcasestr(field, "Upgrade")) {
-	fprintf(stderr, "wrong Connection [%s]\n", field);
+	tcp_report_error(channel, "wrong Connection [%s]\n", field);
 	return 0;
     }
 
-    if (!header_get_path(req, field, sizeof(field))) {
+    if (!header_get_path(channel, req, field, sizeof(field))) {
 	return 0;
     }
 
     if (channel->path) {
 	if (strcmp(field, channel->path)) {
-	    fprintf(stderr, "wrong path [%s]\n", field);
+	    tcp_report_error(channel, "wrong path [%s]\n", field);
 	    return 0;
 	}
     } else {
 	channel->ws_path = strdup(field);
 	if (!channel->ws_path) {
-	    fprintf(stderr, "strdup() failed\n");
+	    tcp_report_error(channel, "strdup() failed\n");
 	    return 0;
 	}
     }
 
-    if (!header_get_field(req, "Sec-WebSocket-Key", field, sizeof(field))) {
+    if (!header_get_field(channel, req, "Sec-WebSocket-Key", field, sizeof(field))) {
 	return 0;
     }
 
@@ -722,7 +740,7 @@ static int http_ws_method_server(tcp_channel *channel, char *request, size_t len
 	if (request) {
 	    *request = 0;
 	}
-	fprintf(stderr, "%s: tcp_write()\n", __func__);
+	tcp_report_error(channel, "%s: tcp_write()\n", __func__);
 	return 0;
     }
 
@@ -735,7 +753,7 @@ static int http_ws_method_client(tcp_channel *channel)
     char req[HTTP_HEADER_MAX_SIZE];
 
     if (simple_connection_get_random(key, WS_KEY_LEN, 0) == -1) {
-	fprintf(stderr, "%s: get_random()\n", __func__);
+	tcp_report_error(channel, "%s: get_random()\n", __func__);
 	return 0;
     }
 
@@ -752,19 +770,19 @@ static int http_ws_method_client(tcp_channel *channel)
     free(key_b64);
 
     if (tcp_write_internal(channel, req, strlen(req)) != strlen(req)) {
-	fprintf(stderr, "%s: tcp_write()\n", __func__);
+	tcp_report_error(channel, "%s: tcp_write()\n", __func__);
 	return 0;
     }
 
     if (get_http_header(channel, req, sizeof(req)) <= 0) {
-	fprintf(stderr, "%s: get_http_header()\n", __func__);
+	tcp_report_error(channel, "%s: get_http_header()\n", __func__);
 	return 0;
     }
 
     static const char *reply = "HTTP/1.1 101 Switching Protocols";
 
     if (strncasecmp(req, reply, strlen(reply))) {
-	fprintf(stderr, "\nwebsocket error\n");
+	tcp_report_error(channel, "\nwebsocket error\n");
 	return 0;
     }
 
@@ -776,7 +794,7 @@ int tcp_connection_upgrade(tcp_channel *u, int connection_method, const char *pa
     if (connection_method == SIMPLE_CONNECTION_METHOD_WS) {
 	ws_t *ws = malloc(sizeof(ws_t));
 	if (!ws) {
-	    fprintf(stderr, "malloc() failed\n");
+	    tcp_report_error(u, "malloc() failed\n");
 	    return 0;
 	}
 	ws->avail = 0;
@@ -830,13 +848,13 @@ static int send_ws_header(tcp_channel *channel, uint8_t opcode, int len)
 	ws->header.b1 |= 0x80; // mask flag
 	sz += 4;
 	if (simple_connection_get_random(mask, 4, 0) == -1) {
-	    fprintf(stderr, "%s: get_random()\n", __func__);
+	    tcp_report_error(channel, "%s: get_random()\n", __func__);
 	    return 0;
 	}
     }
 
     if (tcp_write_internal(channel, (char *)&ws->header, sz) != sz) {
-	fprintf(stderr, "%s: tcp_write()\n", __func__);
+	tcp_report_error(channel, "%s: tcp_write()\n", __func__);
 	return 0;
     }
 
@@ -870,26 +888,26 @@ static int recv_ws_header(tcp_channel *channel)
     ws_t *ws = channel->ws;
 
     if (tcp_read_internal(channel, (char *)&ws->header.b0, 1) != 1) {
-	fprintf(stderr, "%s: tcp_read()\n", __func__);
+	tcp_report_error(channel, "%s: tcp_read()\n", __func__);
 	return 0;
     }
 
     if (tcp_read_internal(channel, (char *)&ws->header.b1, 1) != 1) {
-	fprintf(stderr, "%s: tcp_read()\n", __func__);
+	tcp_report_error(channel, "%s: tcp_read()\n", __func__);
 	return 0;
     }
 
-    if ((ws->header.b0 != (0x80 | WS_OPCODE_BINARY_FRAME)) &&
+	if ((ws->header.b0 != (0x80 | WS_OPCODE_BINARY_FRAME)) &&
 	(ws->header.b0 != (0x80 | WS_OPCODE_CLOSE)) &&
 	(ws->header.b0 != WS_OPCODE_CONTINUATION) &&
 	(ws->header.b0 != (0x80 | WS_OPCODE_PING)) &&
 	(ws->header.b0 != (0x80 | WS_OPCODE_PONG))) {
-	fprintf(stderr, "Unknown ws opcode %02X %02X\n", ws->header.b0, ws->header.b1);
+	tcp_report_error(channel, "Unknown ws opcode %02X %02X\n", ws->header.b0, ws->header.b1);
 	return 0;
     }
 
     if (ws->header.b0 == WS_OPCODE_CONTINUATION) {
-	fprintf(stderr, "Continuation %02X %02X\n", ws->header.b0, ws->header.b1);
+	tcp_report_error(channel, "Continuation %02X %02X\n", ws->header.b0, ws->header.b1);
 	if ((ws->header.b1 & 0x7f) == 0) {
 	    return recv_ws_header(channel);
 	}
@@ -899,11 +917,11 @@ static int recv_ws_header(tcp_channel *channel)
 	char buf[ws->header.b1 + 1];
 	buf[ws->header.b1] = 0;
 	if (tcp_read_internal(channel, buf, ws->header.b1) != ws->header.b1) {
-	    fprintf(stderr, "%s: tcp_read()\n", __func__);
+	    tcp_report_error(channel, "%s: tcp_read()\n", __func__);
 	    return 0;
 	}
 
-	fprintf(stderr, "Connection closed [%s]\n", buf + 2);
+	tcp_report_error(channel, "Connection closed [%s]\n", buf + 2);
 
 	return 0;
     }
@@ -913,13 +931,13 @@ static int recv_ws_header(tcp_channel *channel)
 	int ping_len = 0;
 	if ((ws->header.b1 & 0x7f) == 0x7e) {
 	    if (tcp_read_internal(channel, (char *)&ws->header.u.s16.l16, 2) != 2) {
-		fprintf(stderr, "%s: ping 0x7e - tcp_read()\n", __func__);
+		tcp_report_error(channel, "%s: ping 0x7e - tcp_read()\n", __func__);
 		return 0;
 	    }
 	    ping_len = WS_NTOH16(ws->header.u.s16.l16);
 	} else if ((ws->header.b1 & 0x7f) == 0x7f) {
 	    if (tcp_read_internal(channel, (char *)&ws->header.u.s64.l64, 8) != 8) {
-		fprintf(stderr, "%s: ping 0x7f - tcp_read()\n", __func__);
+		tcp_report_error(channel, "%s: ping 0x7f - tcp_read()\n", __func__);
 		return 0;
 	    }
 	    ping_len = WS_NTOH64(ws->header.u.s64.l64);
@@ -929,17 +947,17 @@ static int recv_ws_header(tcp_channel *channel)
 	if (ws->header.b1 & 0x80) {
 	    if ((ws->header.b1 & 0x7f) == 0x7e) {
 		if (tcp_read_internal(channel, (char *)ws->header.u.s16.m16.c, 4) != 4) {
-		    fprintf(stderr, "%s: ping 0x7e mask - tcp_read()\n", __func__);
+		    tcp_report_error(channel, "%s: ping 0x7e mask - tcp_read()\n", __func__);
 		    return 0;
 		}
 	    } else if ((ws->header.b1 & 0x7f) == 0x7f) {
 		if (tcp_read_internal(channel, (char *)ws->header.u.s64.m64.c, 4) != 4) {
-		    fprintf(stderr, "%s: ping 0x7f mask - tcp_read()\n", __func__);
+		    tcp_report_error(channel, "%s: ping 0x7f mask - tcp_read()\n", __func__);
 		    return 0;
 		}
 	    } else {
 		if (tcp_read_internal(channel, (char *)ws->header.u.m.c, 4) != 4) {
-		    fprintf(stderr, "%s: ping mask - tcp_read()\n", __func__);
+		    tcp_report_error(channel, "%s: ping mask - tcp_read()\n", __func__);
 		    return 0;
 		}
 	    }
@@ -947,18 +965,18 @@ static int recv_ws_header(tcp_channel *channel)
 	if (ping_len > 0) {
 	    buf = malloc(ping_len);
 	    if (!buf) {
-		fprintf(stderr, "malloc() failed for ping payload\n");
+		tcp_report_error(channel, "malloc() failed for ping payload\n");
 		return 0;
 	    }
 	    if (tcp_read_internal(channel, buf, ping_len) != ping_len) {
-		fprintf(stderr, "%s: ping payload - tcp_read()\n", __func__);
+		tcp_report_error(channel, "%s: ping payload - tcp_read()\n", __func__);
 		free(buf);
 		return 0;
 	    }
 	    ws_mask_data(ws, buf, ping_len);
 	}
 	if (!tcp_write_ws(channel, WS_OPCODE_PONG, buf, ping_len)) {
-	    fprintf(stderr, "Failed to send PONG\n");
+	    tcp_report_error(channel, "Failed to send PONG\n");
 	}
 	if (buf) free(buf);
 	return -1;
@@ -968,13 +986,13 @@ static int recv_ws_header(tcp_channel *channel)
 	int pong_len = 0;
 	if ((ws->header.b1 & 0x7f) == 0x7e) {
 	    if (tcp_read_internal(channel, (char *)&ws->header.u.s16.l16, 2) != 2) {
-		fprintf(stderr, "%s: pong 0x7e - tcp_read()\n", __func__);
+		tcp_report_error(channel, "%s: pong 0x7e - tcp_read()\n", __func__);
 		return 0;
 	    }
 	    pong_len = WS_NTOH16(ws->header.u.s16.l16);
 	} else if ((ws->header.b1 & 0x7f) == 0x7f) {
 	    if (tcp_read_internal(channel, (char *)&ws->header.u.s64.l64, 8) != 8) {
-		fprintf(stderr, "%s: pong 0x7f - tcp_read()\n", __func__);
+		tcp_report_error(channel, "%s: pong 0x7f - tcp_read()\n", __func__);
 		return 0;
 	    }
 	    pong_len = WS_NTOH64(ws->header.u.s64.l64);
@@ -984,17 +1002,17 @@ static int recv_ws_header(tcp_channel *channel)
 	if (ws->header.b1 & 0x80) {
 	    if ((ws->header.b1 & 0x7f) == 0x7e) {
 		if (tcp_read_internal(channel, (char *)ws->header.u.s16.m16.c, 4) != 4) {
-		    fprintf(stderr, "%s: pong 0x7e mask - tcp_read()\n", __func__);
+		    tcp_report_error(channel, "%s: pong 0x7e mask - tcp_read()\n", __func__);
 		    return 0;
 		}
 	    } else if ((ws->header.b1 & 0x7f) == 0x7f) {
 		if (tcp_read_internal(channel, (char *)ws->header.u.s64.m64.c, 4) != 4) {
-		    fprintf(stderr, "%s: pong 0x7f mask - tcp_read()\n", __func__);
+		    tcp_report_error(channel, "%s: pong 0x7f mask - tcp_read()\n", __func__);
 		    return 0;
 		}
 	    } else {
 		if (tcp_read_internal(channel, (char *)ws->header.u.m.c, 4) != 4) {
-		    fprintf(stderr, "%s: pong mask - tcp_read()\n", __func__);
+		    tcp_report_error(channel, "%s: pong mask - tcp_read()\n", __func__);
 		    return 0;
 		}
 	    }
@@ -1002,11 +1020,11 @@ static int recv_ws_header(tcp_channel *channel)
 	if (pong_len > 0) {
 	    char *discard = malloc(pong_len);
 	    if (!discard) {
-		fprintf(stderr, "malloc() failed for pong discard\n");
+		tcp_report_error(channel, "malloc() failed for pong discard\n");
 		return 0;
 	    }
 	    if (tcp_read_internal(channel, discard, pong_len) != pong_len) {
-		fprintf(stderr, "%s: pong payload - tcp_read()\n", __func__);
+		tcp_report_error(channel, "%s: pong payload - tcp_read()\n", __func__);
 		free(discard);
 		return 0;
 	    }
@@ -1017,13 +1035,13 @@ static int recv_ws_header(tcp_channel *channel)
 
     if ((ws->header.b1 & 0x7f) == 0x7e) {
 	if (tcp_read_internal(channel, (char *)&ws->header.u.s16.l16, 2) != 2) {
-	    fprintf(stderr, "%s: 0x7e - tcp_read()\n", __func__);
+	    tcp_report_error(channel, "%s: 0x7e - tcp_read()\n", __func__);
 	    return 0;
 	}
 	len = WS_NTOH16(ws->header.u.s16.l16);
     } else if ((ws->header.b1 & 0x7f) == 0x7f) {
 	if (tcp_read_internal(channel, (char *)&ws->header.u.s64.l64, 8) != 8) {
-	    fprintf(stderr, "%s: 0x7f - tcp_read()\n", __func__);
+	    tcp_report_error(channel, "%s: 0x7f - tcp_read()\n", __func__);
 	    return 0;
 	}
 	len = WS_NTOH64(ws->header.u.s64.l64);
@@ -1034,17 +1052,17 @@ static int recv_ws_header(tcp_channel *channel)
     if (ws->header.b1 & 0x80) {
 	if ((ws->header.b1 & 0x7f) == 0x7e) {
 	    if (tcp_read_internal(channel, (char *)ws->header.u.s16.m16.c, 4) != 4) {
-		fprintf(stderr, "%s: 0x7e mask - tcp_read()\n", __func__);
+		tcp_report_error(channel, "%s: 0x7e mask - tcp_read()\n", __func__);
 		return 0;
 	    }
 	} else if ((ws->header.b1 & 0x7f) == 0x7f) {
 	    if (tcp_read_internal(channel, (char *)ws->header.u.s64.m64.c, 4) != 4) {
-		fprintf(stderr, "%s: 0x7f mask - tcp_read()\n", __func__);
+		tcp_report_error(channel, "%s: 0x7f mask - tcp_read()\n", __func__);
 		return 0;
 	    }
 	} else {
 	    if (tcp_read_internal(channel, (char *)ws->header.u.m.c, 4) != 4) {
-		fprintf(stderr, "%s: mask - tcp_read()\n", __func__);
+		tcp_report_error(channel, "%s: mask - tcp_read()\n", __func__);
 		return 0;
 	    }
 	}
@@ -1059,7 +1077,7 @@ static int tcp_write_ws(tcp_channel *u, uint8_t opcode, char *buf, size_t len)
     if (len > 0) {
         tmp = malloc(len);
         if (!tmp) {
-            fprintf(stderr, "malloc() failed\n");
+            tcp_report_error(u, "malloc() failed\n");
             return 0;
         }
     }
@@ -1080,7 +1098,7 @@ static int tcp_write_ws(tcp_channel *u, uint8_t opcode, char *buf, size_t len)
     }
 
     if (tcp_write_internal(u, tmp ? tmp : "", len) != len) {
-	fprintf(stderr, "tcp_write() failed\n");
+	tcp_report_error(u, "tcp_write() failed\n");
         if (tmp) free(tmp);
 	return 0;
     }
@@ -1097,7 +1115,7 @@ int tcp_write(tcp_channel *u, void *buf, size_t len)
     }
 
     if (tcp_write_internal(u, buf, len) != len) {
-	fprintf(stderr, "tcp_write()\n");
+	tcp_report_error(u, "tcp_write()\n");
 	return 0;
     }
 

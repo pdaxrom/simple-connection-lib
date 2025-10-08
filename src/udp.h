@@ -49,6 +49,8 @@ typedef struct _udp_forward {
     struct _udp_forward *next;
 } udp_forward;
 
+typedef void (*udp_error_callback)(const char *message);
+
 typedef struct _udp_channel {
     struct sockaddr_in my_addr;
     struct sockaddr_in *inp_addr;
@@ -56,6 +58,7 @@ typedef struct _udp_channel {
     int s;
     int mode;
     udp_forward	*forward;
+    udp_error_callback error_callback;
 } udp_channel;
 
 #define udp_fd(u) (u->s)

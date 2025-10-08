@@ -46,19 +46,7 @@
 #include "udp.h"
 #include "errors.h"
 
-static void udp_report_error(udp_channel *u, const char *format, ...)
-{
-    va_list args;
-    va_start(args, format);
-    if (u && u->error_callback) {
-        char buffer[1024];
-        vsnprintf(buffer, sizeof(buffer), format, args);
-        u->error_callback(buffer);
-    } else {
-        vfprintf(stderr, format, args);
-    }
-    va_end(args);
-}
+
 
 static void udp_set_error(udp_channel *u, int error_code, const char *format, ...)
 {
@@ -121,13 +109,13 @@ static udp_channel *udp_open_server(uint16_t port)
     char port_str[6];
     snprintf(port_str, sizeof(port_str), "%d", port);
     if (getaddrinfo(NULL, port_str, &hints, &res) != 0) {
-        udp_report_error(u, "getaddrinfo() failed\n");
+        udp_set_error(u, SIMPLE_CONNECTION_ERROR_GETADDRINFO, "getaddrinfo() failed\n");
         free(u);
         return NULL;
     }
 
     if ((u->s = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
-        udp_report_error(u, "socket() failed\n");
+        udp_set_error(u, SIMPLE_CONNECTION_ERROR_SOCKET, "socket() failed\n");
         freeaddrinfo(res);
         free(u);
         return NULL;
@@ -160,7 +148,7 @@ static udp_channel *udp_open_server(uint16_t port)
 
     u->inp_addr = (struct sockaddr_storage *) malloc(sizeof(struct sockaddr_storage));
     if (!u->inp_addr) {
-        udp_report_error(u, "malloc() failed\n");
+        udp_set_error(u, SIMPLE_CONNECTION_ERROR_MALLOC, "malloc() failed\n");
         closesocket(u->s);
         free(u);
         return NULL;
@@ -169,7 +157,7 @@ static udp_channel *udp_open_server(uint16_t port)
 
     u->out_addr = (struct sockaddr_storage *) malloc(sizeof(struct sockaddr_storage));
     if (!u->out_addr) {
-        udp_report_error(u, "malloc() failed\n");
+        udp_set_error(u, SIMPLE_CONNECTION_ERROR_MALLOC, "malloc() failed\n");
         closesocket(u->s);
         free(u->inp_addr);
         free(u);
@@ -202,13 +190,13 @@ static udp_channel *udp_open_client(char *addr, uint16_t port)
     char port_str[6];
     snprintf(port_str, sizeof(port_str), "%d", port);
     if (getaddrinfo(addr, port_str, &hints, &res) != 0) {
-        udp_report_error(u, "getaddrinfo() failed\n");
+        udp_set_error(u, SIMPLE_CONNECTION_ERROR_GETADDRINFO, "getaddrinfo() failed\n");
         free(u);
         return NULL;
     }
 
     if ((u->s = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
-        udp_report_error(u, "socket() failed\n");
+        udp_set_error(u, SIMPLE_CONNECTION_ERROR_SOCKET, "socket() failed\n");
         freeaddrinfo(res);
         free(u);
         return NULL;
@@ -231,10 +219,10 @@ static udp_channel *udp_open_client(char *addr, uint16_t port)
 
 #ifdef _WIN32
     if ((sin->sin_addr.s_addr = inet_addr(addr)) == INADDR_NONE) {
-        udp_report_error(u, "inet_addr() failed\n");
+        udp_set_error(u, SIMPLE_CONNECTION_ERROR_INET_ATON, "inet_addr() failed\n");
 #else
     if (inet_aton(addr, &sin->sin_addr) == 0) {
-        udp_report_error(u, "inet_aton() failed\n");
+        udp_set_error(u, SIMPLE_CONNECTION_ERROR_INET_ATON, "inet_aton() failed\n");
 #endif
         closesocket(u->s);
         free(u);
@@ -349,12 +337,12 @@ int udp_read_src(udp_channel *u, void *buf, size_t len)
     if (u->mode == UDP_SERVER) {
         slen = u->inp_addrlen;
         if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)u->inp_addr, &slen)) == -1) {
-    	    udp_report_error(u, "recvfrom()\n");
+    	    udp_set_error(u, SIMPLE_CONNECTION_ERROR_RECVFROM, "recvfrom()\n");
 	}
     } else {
         slen = u->my_addrlen;
         if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, &slen))==-1) {
-	    udp_report_error(u, "recvfrom()\n");
+	    udp_set_error(u, SIMPLE_CONNECTION_ERROR_RECVFROM, "recvfrom()\n");
 	}
     }
 
@@ -387,14 +375,14 @@ int udp_forward_add(udp_channel *u, char *label)
 
     fwd = (udp_forward *) malloc(sizeof(udp_forward));
     if (!fwd) {
-        udp_report_error(u, "malloc() failed\n");
+        udp_set_error(u, SIMPLE_CONNECTION_ERROR_MALLOC, "malloc() failed\n");
 	return -1;
     }
     fwd->addr = *u->inp_addr;
     fwd->addrlen = u->inp_addrlen;
     fwd->label = strdup(label);
     if (!fwd->label) {
-        udp_report_error(u, "strdup() failed\n");
+        udp_set_error(u, SIMPLE_CONNECTION_ERROR_STRDUP, "strdup() failed\n");
         free(fwd);
         return -1;
     }
@@ -423,7 +411,7 @@ int udp_forward_write(udp_channel *u, char *label, void *buf, size_t len)
 	    socklen_t slen = fwd->addrlen;
 	    int r;
 	    if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)&fwd->addr, slen)) < 0) {
-		udp_report_error(u, "sendto()\n");
+		udp_set_error(u, SIMPLE_CONNECTION_ERROR_SENDTO, "sendto()\n");
 	    }
 
 	fwd->total += len;
@@ -441,7 +429,7 @@ void udp_forward_show(udp_channel *u)
     if (!fwd) {
  	return;
     }
-    udp_report_error(u, "-- UDP forward table --\n");
+    fprintf(stderr, "-- UDP forward table --\n");
     while (fwd) {
         char addr_str[INET6_ADDRSTRLEN];
         uint16_t port = 0;
@@ -456,10 +444,10 @@ void udp_forward_show(udp_channel *u)
         } else {
             strcpy(addr_str, "unknown");
         }
- 	udp_report_error(u, "%s %s:%d %d\n", fwd->label, addr_str, port, fwd->total);
+  	fprintf(stderr, "%s %s:%d %d\n", fwd->label, addr_str, port, fwd->total);
  	fwd = fwd->next;
     }
-    udp_report_error(u, "-----------------------\n");
+    fprintf(stderr, "-----------------------\n");
 }
 
 void udp_forward_remove_inactive(udp_channel *u)

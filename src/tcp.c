@@ -51,19 +51,7 @@
 #include "base64.h"
 #include "errors.h"
 
-static void tcp_report_error(tcp_channel *u, const char *format, ...)
-{
-    va_list args;
-    va_start(args, format);
-    if (u && u->error_callback) {
-        char buffer[1024];
-        vsnprintf(buffer, sizeof(buffer), format, args);
-        u->error_callback(buffer);
-    } else {
-        vfprintf(stderr, format, args);
-    }
-    va_end(args);
-}
+
 
 static void tcp_set_error(tcp_channel *u, int error_code, const char *format, ...)
 {
@@ -378,7 +366,7 @@ static tcp_channel *tcp_open_server(int mode, uint16_t port, char *sslkeyfile, c
     freeaddrinfo(res);
 #else
     if ((u->s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
-        tcp_report_error(u, "socket() error!\n");
+        tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SOCKET, "socket() error!\n");
         free(u);
         return NULL;
     }
@@ -417,7 +405,7 @@ static tcp_channel *tcp_open_server(int mode, uint16_t port, char *sslkeyfile, c
 #ifdef ENABLE_SSL
         u->ctx = ssl_initialize(u, sslkeyfile, sslcertfile);
 #else
-        tcp_report_error(u, "ssl support missed in this configuration!\n");
+        tcp_set_error(u, SIMPLE_CONNECTION_ERROR_INVALID_MODE, "ssl support missed in this configuration!\n");
         closesocket(u->s);
         free(u);
         return NULL;
@@ -447,13 +435,13 @@ static tcp_channel *tcp_open_client(int mode, const char *addr, uint16_t port)
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_protocol = IPPROTO_TCP;
     if (getaddrinfo(addr, NULL, &hints, &res) != 0) {
-        tcp_report_error(u, "getaddrinfo() failed\n");
+        tcp_set_error(u, SIMPLE_CONNECTION_ERROR_GETADDRINFO, "getaddrinfo() failed\n");
         free(u);
         return NULL;
     }
 
     if ((u->s = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
-        tcp_report_error(u, "socket() error!\n");
+        tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SOCKET, "socket() error!\n");
         freeaddrinfo(res);
         free(u);
         return NULL;
@@ -470,14 +458,14 @@ static tcp_channel *tcp_open_client(int mode, const char *addr, uint16_t port)
     freeaddrinfo(res);
 #else
     if ((u->s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
-        tcp_report_error(u, "socket() error!\n");
+        tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SOCKET, "socket() error!\n");
         free(u);
         return NULL;
     }
 
     struct hostent *server = gethostbyname(addr);
     if (server == NULL) {
-        tcp_report_error(u, "gethostbyname() no such host\n");
+        tcp_set_error(u, SIMPLE_CONNECTION_ERROR_GETHOSTBYNAME, "gethostbyname() no such host\n");
         free(u);
         return NULL;
     }
@@ -524,7 +512,7 @@ static tcp_channel *tcp_open_client(int mode, const char *addr, uint16_t port)
             return NULL;
         }
 #else
-        tcp_report_error(u, "ssl support missed in this configuration!\n");
+        tcp_set_error(u, SIMPLE_CONNECTION_ERROR_INVALID_MODE, "ssl support missed in this configuration!\n");
         closesocket(u->s);
         free(u);
         return NULL;
@@ -622,7 +610,7 @@ tcp_channel *tcp_accept(tcp_channel *u)
 {
     tcp_channel *n = (tcp_channel *)malloc(sizeof(tcp_channel));
     if (!n) {
-        tcp_report_error(u, "malloc() failed\n");
+        tcp_set_error(u, SIMPLE_CONNECTION_ERROR_MALLOC, "malloc() failed\n");
         return NULL;
     }
     memset(n, 0, sizeof(tcp_channel));
@@ -752,7 +740,7 @@ static char *copy_string(tcp_channel *u, char *dst, int dstSize, char *src, int 
 	dstSize = srcSize;
 	dst = malloc(dstSize + 1);
 	if (!dst) {
-	    tcp_report_error(u, "malloc() failed\n");
+	    tcp_set_error(u, SIMPLE_CONNECTION_ERROR_MALLOC, "malloc() failed\n");
 	    return NULL;
 	}
     } else {
@@ -818,7 +806,7 @@ static int http_ws_method_server(tcp_channel *channel, char *request, size_t len
     }
 
     if (get_http_header(channel, req, sizeof(req)) <= 0) {
-	tcp_report_error(channel, "%s: get_http_header()\n", __func__);
+	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR, "%s: get_http_header()\n", __func__);
 	return 0;
     }
 
@@ -839,7 +827,7 @@ static int http_ws_method_server(tcp_channel *channel, char *request, size_t len
     }
 
     if (!strcasestr(field, "Upgrade")) {
-	tcp_report_error(channel, "wrong Connection [%s]\n", field);
+	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR, "wrong Connection [%s]\n", field);
 	return 0;
     }
 
@@ -849,13 +837,13 @@ static int http_ws_method_server(tcp_channel *channel, char *request, size_t len
 
     if (channel->path) {
 	if (strcmp(field, channel->path)) {
-	    tcp_report_error(channel, "wrong path [%s]\n", field);
+	    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR, "wrong path [%s]\n", field);
 	    return 0;
 	}
     } else {
 	channel->ws_path = strdup(field);
 	if (!channel->ws_path) {
-	    tcp_report_error(channel, "strdup() failed\n");
+	    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_STRDUP, "strdup() failed\n");
 	    return 0;
 	}
     }
@@ -888,7 +876,7 @@ static int http_ws_method_server(tcp_channel *channel, char *request, size_t len
 	if (request) {
 	    *request = 0;
 	}
-	tcp_report_error(channel, "%s: tcp_write()\n", __func__);
+	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SEND, "%s: tcp_write()\n", __func__);
 	return 0;
     }
 
@@ -901,7 +889,7 @@ static int http_ws_method_client(tcp_channel *channel)
     char req[HTTP_HEADER_MAX_SIZE];
 
     if (simple_connection_get_random(key, WS_KEY_LEN, 0) == -1) {
-	tcp_report_error(channel, "%s: get_random()\n", __func__);
+	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_INVALID_MODE, "%s: get_random()\n", __func__);
 	return 0;
     }
 
@@ -918,19 +906,19 @@ static int http_ws_method_client(tcp_channel *channel)
     free(key_b64);
 
     if (tcp_write_internal(channel, req, strlen(req)) != strlen(req)) {
-	tcp_report_error(channel, "%s: tcp_write()\n", __func__);
+	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SEND, "%s: tcp_write()\n", __func__);
 	return 0;
     }
 
     if (get_http_header(channel, req, sizeof(req)) <= 0) {
-	tcp_report_error(channel, "%s: get_http_header()\n", __func__);
+	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR, "%s: get_http_header()\n", __func__);
 	return 0;
     }
 
     static const char *reply = "HTTP/1.1 101 Switching Protocols";
 
     if (strncasecmp(req, reply, strlen(reply))) {
-	tcp_report_error(channel, "\nwebsocket error\n");
+	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_HANDSHAKE, "\nwebsocket error\n");
 	return 0;
     }
 
@@ -942,7 +930,7 @@ int tcp_connection_upgrade(tcp_channel *u, int connection_method, const char *pa
     if (connection_method == SIMPLE_CONNECTION_METHOD_WS) {
 	ws_t *ws = malloc(sizeof(ws_t));
 	if (!ws) {
-	    tcp_report_error(u, "malloc() failed\n");
+	    tcp_set_error(u, SIMPLE_CONNECTION_ERROR_MALLOC, "malloc() failed\n");
 	    return 0;
 	}
 	ws->avail = 0;
@@ -996,13 +984,13 @@ static int send_ws_header(tcp_channel *channel, uint8_t opcode, int len)
 	ws->header.b1 |= 0x80; // mask flag
 	sz += 4;
 	if (simple_connection_get_random(mask, 4, 0) == -1) {
-	    tcp_report_error(channel, "%s: get_random()\n", __func__);
+	    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_INVALID_MODE, "%s: get_random()\n", __func__);
 	    return 0;
 	}
     }
 
     if (tcp_write_internal(channel, (char *)&ws->header, sz) != sz) {
-	tcp_report_error(channel, "%s: tcp_write()\n", __func__);
+	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SEND, "%s: tcp_write()\n", __func__);
 	return 0;
     }
 
@@ -1036,12 +1024,12 @@ static int recv_ws_header(tcp_channel *channel)
     ws_t *ws = channel->ws;
 
     if (tcp_read_internal(channel, (char *)&ws->header.b0, 1) != 1) {
-	tcp_report_error(channel, "%s: tcp_read()\n", __func__);
+	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: tcp_read()\n", __func__);
 	return 0;
     }
 
     if (tcp_read_internal(channel, (char *)&ws->header.b1, 1) != 1) {
-	tcp_report_error(channel, "%s: tcp_read()\n", __func__);
+	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: tcp_read()\n", __func__);
 	return 0;
     }
 
@@ -1050,12 +1038,12 @@ static int recv_ws_header(tcp_channel *channel)
 	(ws->header.b0 != WS_OPCODE_CONTINUATION) &&
 	(ws->header.b0 != (0x80 | WS_OPCODE_PING)) &&
 	(ws->header.b0 != (0x80 | WS_OPCODE_PONG))) {
-	tcp_report_error(channel, "Unknown ws opcode %02X %02X\n", ws->header.b0, ws->header.b1);
+	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_INVALID_OPCODE, "Unknown ws opcode %02X %02X\n", ws->header.b0, ws->header.b1);
 	return 0;
     }
 
     if (ws->header.b0 == WS_OPCODE_CONTINUATION) {
-	tcp_report_error(channel, "Continuation %02X %02X\n", ws->header.b0, ws->header.b1);
+	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR, "Continuation %02X %02X\n", ws->header.b0, ws->header.b1);
 	if ((ws->header.b1 & 0x7f) == 0) {
 	    return recv_ws_header(channel);
 	}
@@ -1065,11 +1053,11 @@ static int recv_ws_header(tcp_channel *channel)
 	char buf[ws->header.b1 + 1];
 	buf[ws->header.b1] = 0;
 	if (tcp_read_internal(channel, buf, ws->header.b1) != ws->header.b1) {
-	    tcp_report_error(channel, "%s: tcp_read()\n", __func__);
+	    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: tcp_read()\n", __func__);
 	    return 0;
 	}
 
-	tcp_report_error(channel, "Connection closed [%s]\n", buf + 2);
+	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_CONNECTION_CLOSED, "Connection closed [%s]\n", buf + 2);
 
 	return 0;
     }
@@ -1079,13 +1067,13 @@ static int recv_ws_header(tcp_channel *channel)
 	int ping_len = 0;
 	if ((ws->header.b1 & 0x7f) == 0x7e) {
 	    if (tcp_read_internal(channel, (char *)&ws->header.u.s16.l16, 2) != 2) {
-		tcp_report_error(channel, "%s: ping 0x7e - tcp_read()\n", __func__);
+		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: ping 0x7e - tcp_read()\n", __func__);
 		return 0;
 	    }
 	    ping_len = WS_NTOH16(ws->header.u.s16.l16);
 	} else if ((ws->header.b1 & 0x7f) == 0x7f) {
 	    if (tcp_read_internal(channel, (char *)&ws->header.u.s64.l64, 8) != 8) {
-		tcp_report_error(channel, "%s: ping 0x7f - tcp_read()\n", __func__);
+		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: ping 0x7f - tcp_read()\n", __func__);
 		return 0;
 	    }
 	    ping_len = WS_NTOH64(ws->header.u.s64.l64);
@@ -1095,17 +1083,17 @@ static int recv_ws_header(tcp_channel *channel)
 	if (ws->header.b1 & 0x80) {
 	    if ((ws->header.b1 & 0x7f) == 0x7e) {
 		if (tcp_read_internal(channel, (char *)ws->header.u.s16.m16.c, 4) != 4) {
-		    tcp_report_error(channel, "%s: ping 0x7e mask - tcp_read()\n", __func__);
+		    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: ping 0x7e mask - tcp_read()\n", __func__);
 		    return 0;
 		}
 	    } else if ((ws->header.b1 & 0x7f) == 0x7f) {
 		if (tcp_read_internal(channel, (char *)ws->header.u.s64.m64.c, 4) != 4) {
-		    tcp_report_error(channel, "%s: ping 0x7f mask - tcp_read()\n", __func__);
+		    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: ping 0x7f mask - tcp_read()\n", __func__);
 		    return 0;
 		}
 	    } else {
 		if (tcp_read_internal(channel, (char *)ws->header.u.m.c, 4) != 4) {
-		    tcp_report_error(channel, "%s: ping mask - tcp_read()\n", __func__);
+		    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: ping mask - tcp_read()\n", __func__);
 		    return 0;
 		}
 	    }
@@ -1113,18 +1101,18 @@ static int recv_ws_header(tcp_channel *channel)
 	if (ping_len > 0) {
 	    buf = malloc(ping_len);
 	    if (!buf) {
-		tcp_report_error(channel, "malloc() failed for ping payload\n");
+		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_MALLOC, "malloc() failed for ping payload\n");
 		return 0;
 	    }
 	    if (tcp_read_internal(channel, buf, ping_len) != ping_len) {
-		tcp_report_error(channel, "%s: ping payload - tcp_read()\n", __func__);
+		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: ping payload - tcp_read()\n", __func__);
 		free(buf);
 		return 0;
 	    }
 	    ws_mask_data(ws, buf, ping_len);
 	}
 	if (!tcp_write_ws(channel, WS_OPCODE_PONG, buf, ping_len)) {
-	    tcp_report_error(channel, "Failed to send PONG\n");
+	    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SEND, "Failed to send PONG\n");
 	}
 	if (buf) free(buf);
 	return -1;
@@ -1134,13 +1122,13 @@ static int recv_ws_header(tcp_channel *channel)
 	int pong_len = 0;
 	if ((ws->header.b1 & 0x7f) == 0x7e) {
 	    if (tcp_read_internal(channel, (char *)&ws->header.u.s16.l16, 2) != 2) {
-		tcp_report_error(channel, "%s: pong 0x7e - tcp_read()\n", __func__);
+		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: pong 0x7e - tcp_read()\n", __func__);
 		return 0;
 	    }
 	    pong_len = WS_NTOH16(ws->header.u.s16.l16);
 	} else if ((ws->header.b1 & 0x7f) == 0x7f) {
 	    if (tcp_read_internal(channel, (char *)&ws->header.u.s64.l64, 8) != 8) {
-		tcp_report_error(channel, "%s: pong 0x7f - tcp_read()\n", __func__);
+		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: pong 0x7f - tcp_read()\n", __func__);
 		return 0;
 	    }
 	    pong_len = WS_NTOH64(ws->header.u.s64.l64);
@@ -1150,17 +1138,17 @@ static int recv_ws_header(tcp_channel *channel)
 	if (ws->header.b1 & 0x80) {
 	    if ((ws->header.b1 & 0x7f) == 0x7e) {
 		if (tcp_read_internal(channel, (char *)ws->header.u.s16.m16.c, 4) != 4) {
-		    tcp_report_error(channel, "%s: pong 0x7e mask - tcp_read()\n", __func__);
+		    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: pong 0x7e mask - tcp_read()\n", __func__);
 		    return 0;
 		}
 	    } else if ((ws->header.b1 & 0x7f) == 0x7f) {
 		if (tcp_read_internal(channel, (char *)ws->header.u.s64.m64.c, 4) != 4) {
-		    tcp_report_error(channel, "%s: pong 0x7f mask - tcp_read()\n", __func__);
+		    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: pong 0x7f mask - tcp_read()\n", __func__);
 		    return 0;
 		}
 	    } else {
 		if (tcp_read_internal(channel, (char *)ws->header.u.m.c, 4) != 4) {
-		    tcp_report_error(channel, "%s: pong mask - tcp_read()\n", __func__);
+		    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: pong mask - tcp_read()\n", __func__);
 		    return 0;
 		}
 	    }
@@ -1168,11 +1156,11 @@ static int recv_ws_header(tcp_channel *channel)
 	if (pong_len > 0) {
 	    char *discard = malloc(pong_len);
 	    if (!discard) {
-		tcp_report_error(channel, "malloc() failed for pong discard\n");
+		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_MALLOC, "malloc() failed for pong discard\n");
 		return 0;
 	    }
 	    if (tcp_read_internal(channel, discard, pong_len) != pong_len) {
-		tcp_report_error(channel, "%s: pong payload - tcp_read()\n", __func__);
+		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: pong payload - tcp_read()\n", __func__);
 		free(discard);
 		return 0;
 	    }
@@ -1183,13 +1171,13 @@ static int recv_ws_header(tcp_channel *channel)
 
     if ((ws->header.b1 & 0x7f) == 0x7e) {
 	if (tcp_read_internal(channel, (char *)&ws->header.u.s16.l16, 2) != 2) {
-	    tcp_report_error(channel, "%s: 0x7e - tcp_read()\n", __func__);
+	    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: 0x7e - tcp_read()\n", __func__);
 	    return 0;
 	}
 	len = WS_NTOH16(ws->header.u.s16.l16);
     } else if ((ws->header.b1 & 0x7f) == 0x7f) {
 	if (tcp_read_internal(channel, (char *)&ws->header.u.s64.l64, 8) != 8) {
-	    tcp_report_error(channel, "%s: 0x7f - tcp_read()\n", __func__);
+	    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: 0x7f - tcp_read()\n", __func__);
 	    return 0;
 	}
 	len = WS_NTOH64(ws->header.u.s64.l64);
@@ -1200,17 +1188,17 @@ static int recv_ws_header(tcp_channel *channel)
     if (ws->header.b1 & 0x80) {
 	if ((ws->header.b1 & 0x7f) == 0x7e) {
 	    if (tcp_read_internal(channel, (char *)ws->header.u.s16.m16.c, 4) != 4) {
-		tcp_report_error(channel, "%s: 0x7e mask - tcp_read()\n", __func__);
+		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: 0x7e mask - tcp_read()\n", __func__);
 		return 0;
 	    }
 	} else if ((ws->header.b1 & 0x7f) == 0x7f) {
 	    if (tcp_read_internal(channel, (char *)ws->header.u.s64.m64.c, 4) != 4) {
-		tcp_report_error(channel, "%s: 0x7f mask - tcp_read()\n", __func__);
+		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: 0x7f mask - tcp_read()\n", __func__);
 		return 0;
 	    }
 	} else {
 	    if (tcp_read_internal(channel, (char *)ws->header.u.m.c, 4) != 4) {
-		tcp_report_error(channel, "%s: mask - tcp_read()\n", __func__);
+		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: mask - tcp_read()\n", __func__);
 		return 0;
 	    }
 	}
@@ -1225,7 +1213,7 @@ static int tcp_write_ws(tcp_channel *u, uint8_t opcode, char *buf, size_t len)
     if (len > 0) {
         tmp = malloc(len);
         if (!tmp) {
-            tcp_report_error(u, "malloc() failed\n");
+            tcp_set_error(u, SIMPLE_CONNECTION_ERROR_MALLOC, "malloc() failed\n");
             return 0;
         }
     }
@@ -1246,7 +1234,7 @@ static int tcp_write_ws(tcp_channel *u, uint8_t opcode, char *buf, size_t len)
     }
 
     if (tcp_write_internal(u, tmp ? tmp : "", len) != len) {
-	tcp_report_error(u, "tcp_write() failed\n");
+	tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SEND, "tcp_write() failed\n");
         if (tmp) free(tmp);
 	return 0;
     }
@@ -1263,7 +1251,7 @@ int tcp_write(tcp_channel *u, void *buf, size_t len)
     }
 
     if (tcp_write_internal(u, buf, len) != len) {
-	tcp_report_error(u, "tcp_write()\n");
+	tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SEND, "tcp_write()\n");
 	return 0;
     }
 

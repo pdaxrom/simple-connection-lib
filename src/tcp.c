@@ -320,14 +320,13 @@ static tcp_channel *tcp_open_server(int mode, uint16_t port, char *sslkeyfile, c
         return NULL;
     }
 
-#ifndef _WIN32
     int yes = 1;
-    if(setsockopt(u->s, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+    if(setsockopt(u->s, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(int)) == -1) {
         tcp_report_error(u, "setsockopt() error!\n");
+        closesocket(u->s);
         free(u);
         return NULL;
     }
-#endif
 
     memset(&u->my_addr, 0, sizeof(u->my_addr));
     u->my_addr.sin_family = AF_INET;

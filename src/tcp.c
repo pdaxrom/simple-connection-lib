@@ -677,7 +677,7 @@ static int http_ws_method_server(tcp_channel *channel, char *request, size_t len
     }
 
     if (request && len) {
-	strncpy(request, req, len);
+	snprintf(request, len, "%s", req);
     }
 
     if (!header_get_field(channel, req, "Upgrade", field, sizeof(field))) {

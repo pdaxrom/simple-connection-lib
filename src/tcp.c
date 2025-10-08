@@ -272,25 +272,36 @@ static SSL_CTX *ssl_initialize(tcp_channel *channel, char *sslkeyfile, char *ssl
     SSL_load_error_strings();
 
     if ((ssl_context = SSL_CTX_new(TLS_server_method())) == NULL) {
-	tcp_report_error(channel, "Failed to initialize SSL context.\n");
-	goto error1;
+ 	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SSL_CTX_NEW, "Failed to initialize SSL context.\n");
+ 	goto error1;
     }
 
     SSL_CTX_set_options(ssl_context, SSL_OP_ALL | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
 
     if (!SSL_CTX_set_cipher_list(ssl_context, SSL_CIPHER_LIST)) {
-	tcp_report_error(channel, "Failed to set SSL cipher list.\n");
-	goto error1;
+ 	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SSL_CIPHER_LIST, "Failed to set SSL cipher list.\n");
+ 	goto error1;
     }
 
     if (SSL_CTX_use_PrivateKey_file(ssl_context, sslkeyfile, SSL_FILETYPE_PEM) <= 0) {
-	tcp_report_error(channel, "Failed to load private key file.\n");
-	goto error1;
+ 	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SSL_PRIVATE_KEY,
+ 	              "Failed to load private key file '%s'. Check file exists, is readable, and contains valid PEM format.\n",
+ 	              sslkeyfile);
+ 	goto error1;
     }
 
     if (SSL_CTX_use_certificate_file(ssl_context, sslcertfile, SSL_FILETYPE_PEM) <= 0) {
-	tcp_report_error(channel, "Failed to load certificate key file.\n");
-	goto error1;
+ 	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SSL_CERTIFICATE,
+ 	              "Failed to load certificate file '%s'. Check file exists, is readable, and contains valid PEM format.\n",
+ 	              sslcertfile);
+ 	goto error1;
+    }
+
+    // Verify that the private key matches the certificate
+    if (!SSL_CTX_check_private_key(ssl_context)) {
+ 	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SSL_PRIVATE_KEY,
+ 	              "Private key does not match the certificate. Ensure the key and certificate files correspond.\n");
+ 	goto error1;
     }
 
     return ssl_context;
@@ -314,6 +325,7 @@ static SSL_CTX *ssl_client_initialize(void)
 
     if (!ctx) {
 	ERR_print_errors_fp(stderr);
+	return NULL;
     }
 
     return ctx;
@@ -489,11 +501,23 @@ static tcp_channel *tcp_open_client(int mode, const char *addr, uint16_t port)
 #ifdef ENABLE_SSL
         u->ctx = ssl_client_initialize();
         u->ssl = SSL_new(u->ctx);
+        if (!u->ssl) {
+            tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SSL_NEW, "Failed to create SSL object.\n");
+            ssl_tear_down(u->ctx);
+            free(u);
+            return NULL;
+        }
         SSL_set_tlsext_host_name(u->ssl, addr);
-        SSL_set_fd(u->ssl, u->s);
+        if (SSL_set_fd(u->ssl, u->s) != 1) {
+            tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SSL_SET_FD, "Failed to set SSL file descriptor.\n");
+            SSL_free(u->ssl);
+            ssl_tear_down(u->ctx);
+            free(u);
+            return NULL;
+        }
         int retval;
         if ((retval = SSL_connect(u->ssl)) < 0) {
-            tcp_report_error(u, "SSL_connect(): %d\n", SSL_get_error(u->ssl, retval));
+            tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SSL_CONNECT, "SSL_connect() failed: %d\n", SSL_get_error(u->ssl, retval));
             SSL_free(u->ssl);
             ssl_tear_down(u->ctx);
             free(u);
@@ -529,6 +553,18 @@ tcp_channel *tcp_open(int mode, const char *addr, uint16_t port, char *sslkeyfil
         if (!sslkeyfile || !sslcertfile) {
             return NULL;
         }
+        // Validate SSL certificate files exist and are readable
+        FILE *key_file = fopen(sslkeyfile, "r");
+        if (!key_file) {
+            return NULL;
+        }
+        fclose(key_file);
+
+        FILE *cert_file = fopen(sslcertfile, "r");
+        if (!cert_file) {
+            return NULL;
+        }
+        fclose(cert_file);
     }
 
 #ifdef _WIN32
@@ -610,23 +646,29 @@ tcp_channel *tcp_accept(tcp_channel *u)
 
 #ifdef ENABLE_SSL
     if (u->mode == TCP_SSL_SERVER) {
- 	if ((n->ssl = SSL_new(u->ctx)) == NULL) {
- 	    tcp_report_error(u, "Failed to create SSL connection.\n");
- 	    closesocket(n->s);
- 	    free(n);
- 	    return NULL;
- 	}
+  	if ((n->ssl = SSL_new(u->ctx)) == NULL) {
+  	    tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SSL_NEW, "Failed to create SSL connection.\n");
+  	    closesocket(n->s);
+  	    free(n);
+  	    return NULL;
+  	}
 
-	SSL_set_fd(n->ssl, n->s);
+ 	if (SSL_set_fd(n->ssl, n->s) != 1) {
+  	    tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SSL_SET_FD, "Failed to set SSL file descriptor.\n");
+  	    SSL_free(n->ssl);
+  	    closesocket(n->s);
+  	    free(n);
+  	    return NULL;
+  	}
 
- 	if (SSL_accept(n->ssl) < 0) {
- 	    tcp_report_error(u, "Unable to accept SSL connection.\n");
- 	    ERR_print_errors_fp(stderr);
- 	    SSL_free(n->ssl);
- 	    closesocket(n->s);
- 	    free(n);
- 	    return NULL;
- 	}
+  	if (SSL_accept(n->ssl) < 0) {
+  	    tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SSL_ACCEPT, "Unable to accept SSL connection.\n");
+  	    ERR_print_errors_fp(stderr);
+  	    SSL_free(n->ssl);
+  	    closesocket(n->s);
+  	    free(n);
+  	    return NULL;
+  	}
     }
 #endif
 

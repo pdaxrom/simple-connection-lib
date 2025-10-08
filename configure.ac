@@ -11,6 +11,9 @@ case $host_os in
 linux*)
     CFLAGS="$CFLAGS -D_GNU_SOURCE"
     ;;
+irix*)
+    ENABLE_IPV6=no
+    ;;
 esac
 
 AC_ARG_ENABLE(ssl,
@@ -23,6 +26,17 @@ if test "${ENABLE_SSL}" = "yes"; then
 
     PKG_CHECK_MODULES(OPENSSL, libssl libcrypto)
     PKG_CHECK_MODULES_STATIC(OPENSSL_STATIC, libssl libcrypto)
+fi
+
+AC_ARG_ENABLE(ipv6,
+[  --enable-ipv6           enable ipv6],
+ENABLE_IPV6=$enableval,
+ENABLE_IPV6=yes)
+
+if test "${ENABLE_IPV6}" = "yes"; then
+    AC_CHECK_FUNC(getaddrinfo, [AC_DEFINE(HAVE_GETADDRINFO, 1, [Define if getaddrinfo is available])], [])
+    AC_CHECK_TYPE(struct sockaddr_in6, [AC_DEFINE(HAVE_IPV6, 1, [Define if IPv6 is supported])], [], [#include <netinet/in.h>])
+    C_DEFINES="$C_DEFINES -DHAVE_IPV6"
 fi
 
 CFLAGS="$CFLAGS -Wall -Wpedantic"

@@ -34,6 +34,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <netdb.h>
 #define closesocket close
 #else
 #include <windows.h>
@@ -89,31 +90,63 @@ static udp_channel *udp_open_server(uint16_t port)
 
     u->mode = UDP_SERVER;
 
+#ifdef HAVE_IPV6
+    struct addrinfo hints, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET6;
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_protocol = IPPROTO_UDP;
+    hints.ai_flags = AI_PASSIVE;
+    char port_str[6];
+    snprintf(port_str, sizeof(port_str), "%d", port);
+    if (getaddrinfo(NULL, port_str, &hints, &res) != 0) {
+        udp_report_error(u, "getaddrinfo() failed\n");
+        free(u);
+        return NULL;
+    }
+
+    if ((u->s = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
+        udp_report_error(u, "socket() failed\n");
+        freeaddrinfo(res);
+        free(u);
+        return NULL;
+    }
+
+    memcpy(&u->my_addr, res->ai_addr, res->ai_addrlen);
+    u->my_addrlen = res->ai_addrlen;
+
+    freeaddrinfo(res);
+#else
     if ((u->s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
         free(u);
         return NULL;
     }
 
-    memset(&u->my_addr, 0, sizeof(u->my_addr));
-    u->my_addr.sin_family = AF_INET;
-    u->my_addr.sin_port = htons(port);
-    u->my_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    struct sockaddr_in *sin = (struct sockaddr_in *)&u->my_addr;
+    memset(sin, 0, sizeof(*sin));
+    sin->sin_family = AF_INET;
+    sin->sin_port = htons(port);
+    sin->sin_addr.s_addr = htonl(INADDR_ANY);
+    u->my_addrlen = sizeof(*sin);
+#endif
 
-    if (bind(u->s, (struct sockaddr* ) &u->my_addr, sizeof(u->my_addr)) == -1) {
+    if (bind(u->s, (struct sockaddr* ) &u->my_addr, u->my_addrlen) == -1) {
         udp_report_error(u, "bind() failed\n");
         closesocket(u->s);
         free(u);
         return NULL;
     }
 
-    u->inp_addr = (struct sockaddr_in *) malloc(sizeof(struct sockaddr_in));
+    u->inp_addr = (struct sockaddr_storage *) malloc(sizeof(struct sockaddr_storage));
     if (!u->inp_addr) {
         udp_report_error(u, "malloc() failed\n");
         closesocket(u->s);
         free(u);
         return NULL;
     }
-    u->out_addr = (struct sockaddr_in *) malloc(sizeof(struct sockaddr_in));
+    u->inp_addrlen = sizeof(struct sockaddr_storage);
+
+    u->out_addr = (struct sockaddr_storage *) malloc(sizeof(struct sockaddr_storage));
     if (!u->out_addr) {
         udp_report_error(u, "malloc() failed\n");
         closesocket(u->s);
@@ -121,6 +154,7 @@ static udp_channel *udp_open_server(uint16_t port)
         free(u);
         return NULL;
     }
+    u->out_addrlen = sizeof(struct sockaddr_storage);
 
     u->forward = NULL;
 
@@ -138,26 +172,55 @@ static udp_channel *udp_open_client(char *addr, uint16_t port)
 
     u->mode = UDP_CLIENT;
 
+#ifdef HAVE_IPV6
+    struct addrinfo hints, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;  // Allow both IPv4 and IPv6
+    hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_protocol = IPPROTO_UDP;
+    char port_str[6];
+    snprintf(port_str, sizeof(port_str), "%d", port);
+    if (getaddrinfo(addr, port_str, &hints, &res) != 0) {
+        udp_report_error(u, "getaddrinfo() failed\n");
+        free(u);
+        return NULL;
+    }
+
+    if ((u->s = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
+        udp_report_error(u, "socket() failed\n");
+        freeaddrinfo(res);
+        free(u);
+        return NULL;
+    }
+
+    memcpy(&u->my_addr, res->ai_addr, res->ai_addrlen);
+    u->my_addrlen = res->ai_addrlen;
+
+    freeaddrinfo(res);
+#else
     if ((u->s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
         free(u);
         return NULL;
     }
 
-    memset(&u->my_addr, 0, sizeof(u->my_addr));
-    u->my_addr.sin_family = AF_INET;
-    u->my_addr.sin_port = htons(port);
+    struct sockaddr_in *sin = (struct sockaddr_in *)&u->my_addr;
+    memset(sin, 0, sizeof(*sin));
+    sin->sin_family = AF_INET;
+    sin->sin_port = htons(port);
 
 #ifdef _WIN32
-    if ((u->my_addr.sin_addr.s_addr = inet_addr(addr)) == INADDR_NONE) {
+    if ((sin->sin_addr.s_addr = inet_addr(addr)) == INADDR_NONE) {
         udp_report_error(u, "inet_addr() failed\n");
 #else
-    if (inet_aton(addr, &u->my_addr.sin_addr) == 0) {
+    if (inet_aton(addr, &sin->sin_addr) == 0) {
         udp_report_error(u, "inet_aton() failed\n");
 #endif
         closesocket(u->s);
         free(u);
         return NULL;
     }
+    u->my_addrlen = sizeof(*sin);
+#endif
 
     u->inp_addr = NULL;
     u->out_addr = NULL;
@@ -219,14 +282,16 @@ int udp_close(udp_channel *u)
 int udp_read(udp_channel *u, void *buf, size_t len)
 {
     int r;
-    socklen_t slen = sizeof(u->my_addr);
+    socklen_t slen = u->inp_addrlen;
 
     if (u->mode == UDP_SERVER) {
         if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)u->inp_addr, &slen)) == -1) {
     	    udp_report_error(u, "recvfrom()\n");
 	}
 	*u->out_addr = *u->inp_addr;
+	u->out_addrlen = slen;
     } else {
+        slen = u->my_addrlen;
         if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, &slen))==-1) {
 	    udp_report_error(u, "recvfrom()\n");
 	}
@@ -238,13 +303,15 @@ int udp_read(udp_channel *u, void *buf, size_t len)
 int udp_write(udp_channel *u, void *buf, size_t len)
 {
     int r;
-    socklen_t slen = sizeof(u->my_addr);
+    socklen_t slen;
 
     if (u->mode == UDP_SERVER) {
+        slen = u->out_addrlen;
 	if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)u->out_addr, slen)) < 0) {
 	    udp_report_error(u, "sendto()\n");
 	}
     } else {
+        slen = u->my_addrlen;
 	if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, slen)) == -1) {
 	    udp_report_error(u, "sendto()\n");
 	}
@@ -256,13 +323,15 @@ int udp_write(udp_channel *u, void *buf, size_t len)
 int udp_read_src(udp_channel *u, void *buf, size_t len)
 {
     int r;
-    socklen_t slen = sizeof(u->my_addr);
+    socklen_t slen;
 
     if (u->mode == UDP_SERVER) {
+        slen = u->inp_addrlen;
         if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)u->inp_addr, &slen)) == -1) {
     	    udp_report_error(u, "recvfrom()\n");
 	}
     } else {
+        slen = u->my_addrlen;
         if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, &slen))==-1) {
 	    udp_report_error(u, "recvfrom()\n");
 	}
@@ -301,6 +370,7 @@ int udp_forward_add(udp_channel *u, char *label)
 	return -1;
     }
     fwd->addr = *u->inp_addr;
+    fwd->addrlen = u->inp_addrlen;
     fwd->label = strdup(label);
     if (!fwd->label) {
         udp_report_error(u, "strdup() failed\n");
@@ -329,7 +399,7 @@ int udp_forward_write(udp_channel *u, char *label, void *buf, size_t len)
     udp_forward *fwd = u->forward;
     while(fwd) {
 	if (!strcmp(fwd->label, label)) {
-	    socklen_t slen = sizeof(fwd->addr);
+	    socklen_t slen = fwd->addrlen;
 	    int r;
 	    if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)&fwd->addr, slen)) < 0) {
 		udp_report_error(u, "sendto()\n");
@@ -348,12 +418,25 @@ void udp_forward_show(udp_channel *u)
 {
     udp_forward *fwd = u->forward;
     if (!fwd) {
-	return;
+ 	return;
     }
     udp_report_error(u, "-- UDP forward table --\n");
     while (fwd) {
-	udp_report_error(u, "%s %s:%d %d\n", fwd->label, inet_ntoa(fwd->addr.sin_addr), ntohs(fwd->addr.sin_port), fwd->total);
-	fwd = fwd->next;
+        char addr_str[INET6_ADDRSTRLEN];
+        uint16_t port = 0;
+        if (fwd->addr.ss_family == AF_INET) {
+            struct sockaddr_in *sin = (struct sockaddr_in *)&fwd->addr;
+            inet_ntop(AF_INET, &sin->sin_addr, addr_str, sizeof(addr_str));
+            port = ntohs(sin->sin_port);
+        } else if (fwd->addr.ss_family == AF_INET6) {
+            struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)&fwd->addr;
+            inet_ntop(AF_INET6, &sin6->sin6_addr, addr_str, sizeof(addr_str));
+            port = ntohs(sin6->sin6_port);
+        } else {
+            strcpy(addr_str, "unknown");
+        }
+ 	udp_report_error(u, "%s %s:%d %d\n", fwd->label, addr_str, port, fwd->total);
+ 	fwd = fwd->next;
     }
     udp_report_error(u, "-----------------------\n");
 }

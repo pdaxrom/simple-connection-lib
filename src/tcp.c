@@ -314,11 +314,46 @@ static tcp_channel *tcp_open_server(int mode, uint16_t port, char *sslkeyfile, c
     u->mode = mode;
     u->primary_mode = mode;
 
+#ifdef HAVE_IPV6
+    struct addrinfo hints, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET6;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    hints.ai_flags = AI_PASSIVE;
+    char port_str[6];
+    snprintf(port_str, sizeof(port_str), "%d", port);
+    if (getaddrinfo(NULL, port_str, &hints, &res) != 0) {
+        tcp_report_error(u, "getaddrinfo() failed\n");
+        free(u);
+        return NULL;
+    }
+
+    if ((u->s = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
+        tcp_report_error(u, "socket() error!\n");
+        freeaddrinfo(res);
+        free(u);
+        return NULL;
+    }
+
+    memcpy(&u->my_addr, res->ai_addr, res->ai_addrlen);
+    u->addrlen = res->ai_addrlen;
+
+    freeaddrinfo(res);
+#else
     if ((u->s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
         tcp_report_error(u, "socket() error!\n");
         free(u);
         return NULL;
     }
+
+    struct sockaddr_in *sin = (struct sockaddr_in *)&u->my_addr;
+    memset(sin, 0, sizeof(*sin));
+    sin->sin_family = AF_INET;
+    sin->sin_addr.s_addr = INADDR_ANY;
+    sin->sin_port = htons(port);
+    u->addrlen = sizeof(*sin);
+#endif
 
     int yes = 1;
     if(setsockopt(u->s, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(int)) == -1) {
@@ -328,12 +363,7 @@ static tcp_channel *tcp_open_server(int mode, uint16_t port, char *sslkeyfile, c
         return NULL;
     }
 
-    memset(&u->my_addr, 0, sizeof(u->my_addr));
-    u->my_addr.sin_family = AF_INET;
-    u->my_addr.sin_addr.s_addr = INADDR_ANY;
-    u->my_addr.sin_port = htons(port);
-
-    if(bind(u->s, (struct sockaddr *)&u->my_addr, sizeof(u->my_addr)) == -1) {
+    if(bind(u->s, (struct sockaddr *)&u->my_addr, u->addrlen) == -1) {
         tcp_report_error(u, "bind() error!\n");
         closesocket(u->s);
         free(u);
@@ -374,6 +404,35 @@ static tcp_channel *tcp_open_client(int mode, const char *addr, uint16_t port)
     u->mode = mode;
     u->primary_mode = mode;
 
+#ifdef HAVE_IPV6
+    struct addrinfo hints, *res;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    if (getaddrinfo(addr, NULL, &hints, &res) != 0) {
+        tcp_report_error(u, "getaddrinfo() failed\n");
+        free(u);
+        return NULL;
+    }
+
+    if ((u->s = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
+        tcp_report_error(u, "socket() error!\n");
+        freeaddrinfo(res);
+        free(u);
+        return NULL;
+    }
+
+    memcpy(&u->my_addr, res->ai_addr, res->ai_addrlen);
+    u->addrlen = res->ai_addrlen;
+    struct sockaddr *sa = (struct sockaddr *)&u->my_addr;
+    if (sa->sa_family == AF_INET) {
+        ((struct sockaddr_in *)sa)->sin_port = htons(port);
+    } else if (sa->sa_family == AF_INET6) {
+        ((struct sockaddr_in6 *)sa)->sin6_port = htons(port);
+    }
+    freeaddrinfo(res);
+#else
     if ((u->s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
         tcp_report_error(u, "socket() error!\n");
         free(u);
@@ -387,12 +446,15 @@ static tcp_channel *tcp_open_client(int mode, const char *addr, uint16_t port)
         return NULL;
     }
 
-    memset(&u->my_addr, 0, sizeof(u->my_addr));
-    u->my_addr.sin_family = AF_INET;
-    u->my_addr.sin_addr = *((struct in_addr *)server->h_addr);
-    u->my_addr.sin_port = htons(port);
+    struct sockaddr_in *sin = (struct sockaddr_in *)&u->my_addr;
+    memset(sin, 0, sizeof(*sin));
+    sin->sin_family = AF_INET;
+    sin->sin_addr = *((struct in_addr *)server->h_addr);
+    sin->sin_port = htons(port);
+    u->addrlen = sizeof(*sin);
+#endif
 
-    if (connect(u->s, (struct sockaddr *)&u->my_addr, sizeof(struct sockaddr)) == -1) {
+    if (connect(u->s, (struct sockaddr *)&u->my_addr, u->addrlen) == -1) {
         tcp_report_error(u, "connect()\n");
         closesocket(u->s);
         free(u);
@@ -514,12 +576,13 @@ tcp_channel *tcp_accept(tcp_channel *u)
 
     n->primary_mode = u->mode;
 
-    socklen_t l = sizeof(struct sockaddr);
+    socklen_t l = sizeof(n->my_addr);
     if ((n->s = accept(u->s, (struct sockaddr *)&n->my_addr, &l)) < 0) {
- 	tcp_report_error(u, "accept()\n");
- 	free(n);
- 	return NULL;
+  	tcp_report_error(u, "accept()\n");
+  	free(n);
+  	return NULL;
     }
+    n->addrlen = l;
 
 #ifdef ENABLE_SSL
     if (u->mode == TCP_SSL_SERVER) {

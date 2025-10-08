@@ -44,7 +44,8 @@ enum {
 };
 
 typedef struct _udp_forward {
-    struct sockaddr_in addr;
+    struct sockaddr_storage addr;
+    socklen_t addrlen;
     char 	*label;
     int 	used;
     uint32_t	total;
@@ -54,9 +55,12 @@ typedef struct _udp_forward {
 typedef void (*udp_error_callback)(const char *message);
 
 typedef struct _udp_channel {
-    struct sockaddr_in my_addr;
-    struct sockaddr_in *inp_addr;
-    struct sockaddr_in *out_addr;
+    struct sockaddr_storage my_addr;
+    socklen_t my_addrlen;
+    struct sockaddr_storage *inp_addr;
+    socklen_t inp_addrlen;
+    struct sockaddr_storage *out_addr;
+    socklen_t out_addrlen;
     int s;
     int mode;
     udp_forward	*forward;

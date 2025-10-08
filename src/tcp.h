@@ -58,7 +58,8 @@ typedef void (*tcp_error_callback)(const char *message);
 
 typedef struct _tcp_channel {
     int s;
-    struct sockaddr_in my_addr;
+    struct sockaddr_storage my_addr;
+    socklen_t addrlen;
     int mode;
     int primary_mode;
 #ifdef ENABLE_SSL

@@ -1,7 +1,7 @@
 AM_CFLAGS = $(OPENSSL_STATIC_CFLAGS) -I../src
 LIBS = ../src/libsimple_connection.la $(OPENSSL_STATIC_LIBS)
 
-noinst_PROGRAMS = tcpclient tcpserver tcpclient-ws tcpserver-ws tcpclient-ws-comprehensive tcpserver-ws-comprehensive tcpsslclient tcpsslserver tcpsslclient-ws tcpsslserver-ws udpchat udpclient udpserver
+noinst_PROGRAMS = tcpclient tcpserver tcpclient-ws tcpserver-ws tcpclient-ws-comprehensive tcpserver-ws-comprehensive tcpsslclient tcpsslserver tcpsslclient-ws tcpsslserver-ws udpchat udpclient udpserver tcpclient-ipv6 tcpserver-ipv6 udpclient-ipv6 udpserver-ipv6
 
 tcpclient_SOURCES = tcpclient.c
 tcpclient_LDADD = ../src/libsimple_connection.la
@@ -41,3 +41,15 @@ udpserver_LDADD = ../src/libsimple_connection.la
 
 udpchat_SOURCES = udpchat.c
 udpchat_LDADD = ../src/libsimple_connection.la
+
+tcpclient_ipv6_SOURCES = tcpclient-ipv6.c
+tcpclient_ipv6_LDADD = ../src/libsimple_connection.la
+
+tcpserver_ipv6_SOURCES = tcpserver-ipv6.c
+tcpserver_ipv6_LDADD = ../src/libsimple_connection.la
+
+udpclient_ipv6_SOURCES = udpclient-ipv6.c
+udpclient_ipv6_LDADD = ../src/libsimple_connection.la
+
+udpserver_ipv6_SOURCES = udpserver-ipv6.c
+udpserver_ipv6_LDADD = ../src/libsimple_connection.la

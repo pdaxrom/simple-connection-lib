@@ -14,7 +14,7 @@ int main(int argc, char *argv[])
 {
     char buf[BUF_SIZE];
     int r;
-    udp_channel *server = udp_open(UDP_CLIENT, "127.0.0.1", 9998);
+    udp_channel *server = udp_open(UDP_CLIENT, "127.0.0.1", 9999);
     if (!server) {
 	fprintf(stderr, "udp_open()\n");
 	return -1;

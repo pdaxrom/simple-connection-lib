@@ -1180,3 +1180,10 @@ int tcp_pong(tcp_channel *u, void *buf, size_t len)
     }
     return tcp_write_ws(u, WS_OPCODE_PONG, buf, len);
 }
+
+void tcp_set_error_callback(tcp_channel *u, tcp_error_callback cb)
+{
+    if (u) {
+        u->error_callback = cb;
+    }
+}

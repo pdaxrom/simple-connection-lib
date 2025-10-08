@@ -79,6 +79,7 @@ int udp_forward_add(udp_channel *u, char *label);
 int udp_forward_write(udp_channel *u, char *label, void *buf, size_t len);
 void udp_forward_show(udp_channel *u);
 void udp_forward_remove_inactive(udp_channel *u);
+void udp_set_error_callback(udp_channel *u, udp_error_callback cb);
 
 #ifdef __cplusplus
 }

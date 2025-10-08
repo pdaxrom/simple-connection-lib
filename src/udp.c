@@ -374,3 +374,10 @@ void udp_forward_remove_inactive(udp_channel *u)
 	fwd = fwd->next;
     }
 }
+
+void udp_set_error_callback(udp_channel *u, udp_error_callback cb)
+{
+    if (u) {
+        u->error_callback = cb;
+    }
+}

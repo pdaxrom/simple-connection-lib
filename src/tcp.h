@@ -88,6 +88,7 @@ int tcp_write(tcp_channel *u, void *buf, size_t len);
 int tcp_ping(tcp_channel *u, void *buf, size_t len);
 int tcp_pong(tcp_channel *u, void *buf, size_t len);
 int tcp_close(tcp_channel *u);
+void tcp_set_error_callback(tcp_channel *u, tcp_error_callback cb);
 
 #ifdef __cplusplus
 }

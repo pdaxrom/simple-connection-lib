@@ -91,6 +91,8 @@ static void tcp_report_error(tcp_channel *u, const char *format, ...)
 #define be64toh(x) __builtin_bswap64(x)
 #define le64toh(x) (x)
 
+#define ntobe64(x) __builtin_bswap64(x)
+#define ntobe16(x) ntohs(x)
 #endif
 
 #ifdef sgi
@@ -186,7 +188,7 @@ static int winsock_init(void)
 	return 0;
 
     if (WSAStartup(0x0101, &w) != 0) {
-	tcp_report_error(channel, "Could not open Windows connection.\n");
+	fprintf(stderr, "Could not open Windows connection.\n");
 	return -1;
     }
     

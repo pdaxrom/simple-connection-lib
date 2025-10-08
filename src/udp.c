@@ -68,7 +68,7 @@ static int winsock_init(void)
 	return 0;
 
     if (WSAStartup(0x0101, &w) != 0) {
-	udp_report_error(channel, "Could not open Windows connection.\n");
+	fprintf(stderr, "Could not open Windows connection.\n");
 	return -1;
     }
     

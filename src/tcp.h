@@ -34,7 +34,8 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #else
-#include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #endif
 #ifdef ENABLE_SSL
 #include <openssl/ssl.h>

@@ -37,7 +37,8 @@
 #include <netdb.h>
 #define closesocket close
 #else
-#include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #endif
 
 #define PORT 9930

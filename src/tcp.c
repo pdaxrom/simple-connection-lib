@@ -505,7 +505,7 @@ tcp_channel *tcp_open(int mode, const char *addr, uint16_t port, char *sslkeyfil
         }
     }
 
-    if ((mode == TCP_SSL_SERVER) || (mode == TCP_SSL_CLIENT)) {
+    if (mode == TCP_SSL_SERVER) {
         if (!sslkeyfile || !sslcertfile) {
             return NULL;
         }

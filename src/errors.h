@@ -25,6 +25,13 @@
 #ifndef ERRORS_H
 #define ERRORS_H
 
+/* Thread-local storage for thread safety */
+#ifdef _WIN32
+#define THREAD_LOCAL __declspec(thread)
+#else
+#define THREAD_LOCAL __thread
+#endif
+
 #include <errno.h>
 
 #ifdef __cplusplus
@@ -100,8 +107,8 @@ typedef struct {
     char message[256];      /* Human-readable error message */
 } simple_connection_error_info;
 
-/* Global error info - thread local if needed */
-extern simple_connection_error_info simple_connection_last_error;
+/* Global error info - thread local for thread safety */
+extern THREAD_LOCAL simple_connection_error_info simple_connection_last_error;
 
 /* Functions to get error information */
 int simple_connection_get_last_error(void);

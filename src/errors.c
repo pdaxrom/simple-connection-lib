@@ -30,8 +30,8 @@
 
 #include "errors.h"
 
-/* Global error info */
-simple_connection_error_info simple_connection_last_error = {
+/* Global error info - thread local for thread safety */
+THREAD_LOCAL simple_connection_error_info simple_connection_last_error = {
     .error_code = SIMPLE_CONNECTION_SUCCESS,
     .system_errno = 0,
     .function = NULL,

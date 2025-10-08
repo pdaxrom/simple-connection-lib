@@ -1,7 +1,7 @@
 AM_CFLAGS = $(OPENSSL_STATIC_CFLAGS) -I../src
 LIBS = ../src/libsimple_connection.la $(OPENSSL_STATIC_LIBS)
 
-noinst_PROGRAMS = tcpclient tcpserver tcpclient-ws tcpserver-ws tcpsslclient tcpsslserver tcpsslclient-ws tcpsslserver-ws udpchat udpclient udpserver
+noinst_PROGRAMS = tcpclient tcpserver tcpclient-ws tcpserver-ws tcpclient-ws-comprehensive tcpserver-ws-comprehensive tcpsslclient tcpsslserver tcpsslclient-ws tcpsslserver-ws udpchat udpclient udpserver
 
 tcpclient_SOURCES = tcpclient.c
 tcpclient_LDADD = ../src/libsimple_connection.la
@@ -14,6 +14,12 @@ tcpclient_ws_LDADD = ../src/libsimple_connection.la
 
 tcpserver_ws_SOURCES = tcpserver-ws.c
 tcpserver_ws_LDADD = ../src/libsimple_connection.la
+
+tcpclient_ws_comprehensive_SOURCES = tcpclient-ws-comprehensive.c
+tcpclient_ws_comprehensive_LDADD = ../src/libsimple_connection.la
+
+tcpserver_ws_comprehensive_SOURCES = tcpserver-ws-comprehensive.c
+tcpserver_ws_comprehensive_LDADD = ../src/libsimple_connection.la
 
 tcpsslclient_SOURCES = tcpsslclient.c
 tcpsslclient_LDADD = ../src/libsimple_connection.la

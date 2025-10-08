@@ -43,6 +43,12 @@ int main(int argc, char *argv[])
 	fprintf(stderr, "tcp_write()\n");
     }
 
+    // Send a PING
+    strcpy(buf, "ping");
+    if (tcp_ping(client, buf, strlen(buf)) <= 0) {
+	fprintf(stderr, "tcp_ping()\n");
+    }
+
     tcp_close(client);
     tcp_close(server);
 

@@ -82,6 +82,8 @@ tcp_channel *tcp_accept(tcp_channel *u);
 int tcp_connection_upgrade(tcp_channel *u, int connection_method, const char *path, char *request, size_t len);
 int tcp_read(tcp_channel *u, void *buf, size_t len);
 int tcp_write(tcp_channel *u, void *buf, size_t len);
+int tcp_ping(tcp_channel *u, void *buf, size_t len);
+int tcp_pong(tcp_channel *u, void *buf, size_t len);
 int tcp_close(tcp_channel *u);
 
 #ifdef __cplusplus

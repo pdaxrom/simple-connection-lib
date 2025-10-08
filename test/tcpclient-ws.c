@@ -35,6 +35,12 @@ int main(int argc, char *argv[])
 	fprintf(stderr, "buf[%d]=%s\n", r, buf);
     }
 
+    // Send a PING
+    strcpy(buf, "ping from client");
+    if (tcp_ping(server, buf, strlen(buf)) <= 0) {
+	fprintf(stderr, "tcp_ping()\n");
+    }
+
     tcp_close(server);
 
     return 0;

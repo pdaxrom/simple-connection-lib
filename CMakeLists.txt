@@ -24,7 +24,11 @@ if(ENABLE_IPV6)
     include(CheckTypeSize)
 
     check_function_exists(getaddrinfo HAVE_GETADDRINFO)
+
+    # Check for IPv6 support with proper headers
+    set(CMAKE_EXTRA_INCLUDE_FILES "sys/types.h;netinet/in.h")
     check_type_size("struct sockaddr_in6" SOCKADDR_IN6_SIZE)
+    set(CMAKE_EXTRA_INCLUDE_FILES)
 
     if(HAVE_GETADDRINFO)
         add_definitions(-DHAVE_GETADDRINFO)

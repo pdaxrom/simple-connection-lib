@@ -64,30 +64,44 @@ run_test() {
 # Build the project first
 echo "Building project..."
 cd ..
-make clean && make
-if [ $? -ne 0 ]; then
-    echo -e "${RED}Build failed!${NC}"
-    exit 1
+if command -v cmake >/dev/null 2>&1; then
+    # Use CMake build
+    mkdir -p build && cd build
+    cmake .. && make
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}CMake build failed!${NC}"
+        exit 1
+    fi
+    cd ../test
+    TEST_PREFIX="../build/test/"
+else
+    # Fallback to autotools
+    make clean && make
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Autotools build failed!${NC}"
+        exit 1
+    fi
+    cd test
+    TEST_PREFIX="./"
 fi
-cd test
 
 # Test 1: TCP IPv4
-run_test "TCP IPv4" "./tcpserver" "./tcpclient" "Hello client"
+run_test "TCP IPv4" "${TEST_PREFIX}tcpserver" "${TEST_PREFIX}tcpclient" "Hello client"
 
 # Test 2: TCP IPv6
-run_test "TCP IPv6" "./tcpserver-ipv6" "./tcpclient-ipv6" "Hello IPv6 client"
+run_test "TCP IPv6" "${TEST_PREFIX}tcpserver-ipv6" "${TEST_PREFIX}tcpclient-ipv6" "Hello IPv6 client"
 
 # Test 3: UDP IPv4
-run_test "UDP IPv4" "./udpserver" "./udpclient" "Hello client"
+run_test "UDP IPv4" "${TEST_PREFIX}udpserver" "${TEST_PREFIX}udpclient" "Hello client"
 
 # Test 4: UDP IPv6
-run_test "UDP IPv6" "./udpserver-ipv6" "./udpclient-ipv6" "Hello UDP IPv6 client"
+run_test "UDP IPv6" "${TEST_PREFIX}udpserver-ipv6" "${TEST_PREFIX}udpclient-ipv6" "Hello UDP IPv6 client"
 
 # Test 5: TCP SSL
-run_test "TCP SSL" "./tcpsslserver" "./tcpsslclient" "Hello client"
+run_test "TCP SSL" "${TEST_PREFIX}tcpsslserver" "${TEST_PREFIX}tcpsslclient" "Hello client"
 
 # Test 6: WebSocket
-run_test "WebSocket" "./tcpserver-ws-comprehensive" "./tcpclient-ws-comprehensive" "WebSocket client test completed"
+run_test "WebSocket" "${TEST_PREFIX}tcpserver-ws-comprehensive" "${TEST_PREFIX}tcpclient-ws-comprehensive" "WebSocket client test completed"
 
 # Summary
 echo -e "\n${YELLOW}Test Summary:${NC}"

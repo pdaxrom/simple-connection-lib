@@ -1,0 +1,43 @@
+@PACKAGE_INIT@
+
+# simple_connection CMake configuration file
+
+set(simple_connection_VERSION "@PROJECT_VERSION@")
+
+# Compute paths
+get_filename_component(simple_connection_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+
+# Find the library
+find_library(simple_connection_LIBRARY
+    NAMES simple_connection
+    PATHS "${simple_connection_CMAKE_DIR}/../../../lib"
+    NO_DEFAULT_PATH
+)
+
+# Find the headers
+find_path(simple_connection_INCLUDE_DIR
+    NAMES tcp.h udp.h
+    PATHS "${simple_connection_CMAKE_DIR}/../../../include"
+    NO_DEFAULT_PATH
+)
+
+# Set up the imported target
+if(NOT TARGET simple_connection::simple_connection)
+    add_library(simple_connection::simple_connection UNKNOWN IMPORTED)
+    set_target_properties(simple_connection::simple_connection PROPERTIES
+        IMPORTED_LOCATION "${simple_connection_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${simple_connection_INCLUDE_DIR}"
+    )
+endif()
+
+# Check if everything was found
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(simple_connection
+    REQUIRED_VARS simple_connection_LIBRARY simple_connection_INCLUDE_DIR
+    VERSION_VAR simple_connection_VERSION
+)
+
+if(simple_connection_FOUND)
+    set(simple_connection_LIBRARIES simple_connection::simple_connection)
+    set(simple_connection_INCLUDE_DIRS "${simple_connection_INCLUDE_DIR}")
+endif()

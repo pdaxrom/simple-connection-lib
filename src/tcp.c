@@ -1,7 +1,7 @@
 /*
  *  TCP IO wrapper
  *
- *  Copyright (c) 2008-2021 Alexander Chukov <sashz@pdaXrom.org>
+ *  Copyright (c) 2008-2025 Alexander Chukov <sashz@pdaXrom.org>
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -36,24 +36,6 @@
 #include "errors.h"
 #include "socket_utils.h"
 
-
-
-static void tcp_set_error(tcp_channel *u, int error_code, const char *format, ...)
-{
-    void (*callback)(const char *) = u ? u->error_callback : NULL;
-    va_list args;
-    va_start(args, format);
-    simple_connection_set_channel_error(u, callback, error_code, errno,
-                                      __func__, __LINE__, format, args);
-    va_end(args);
-}
-
-#if defined(__APPLE__)
-
-
-
-#endif
-
 enum
 {
     WS_OPCODE_CONTINUATION = 0x00,
@@ -66,39 +48,39 @@ enum
 };
 
 typedef union ws_mask_s {
-  unsigned char c[4];
-  uint32_t u;
+    unsigned char c[4];
+    uint32_t u;
 } ws_mask_t;
 
 #if _WIN32
 #pragma pack(push, 1)
 #endif
 typedef struct
-#if __GNUC__
-__attribute__ ((__packed__))
+        #if __GNUC__
+        __attribute__ ((__packed__))
 #endif
 ws_header_s {
-  unsigned char b0;
-  unsigned char b1;
-  union {
-    struct 
-#if __GNUC__
-    __attribute__ ((__packed__))
-#endif
-           {
-      uint16_t l16;
-      ws_mask_t m16;
-    } s16;
-    struct
-#if __GNUC__
-__attribute__ ((__packed__))
-#endif
-           {
-      uint64_t l64;
-      ws_mask_t m64;
-    } s64;
-    ws_mask_t m;
-  } u;
+    unsigned char b0;
+    unsigned char b1;
+    union {
+        struct
+        #if __GNUC__
+                __attribute__ ((__packed__))
+        #endif
+        {
+            uint16_t l16;
+            ws_mask_t m16;
+        } s16;
+        struct
+        #if __GNUC__
+                __attribute__ ((__packed__))
+        #endif
+        {
+            uint64_t l64;
+            ws_mask_t m64;
+        } s64;
+        ws_mask_t m;
+    } u;
 } ws_header_t;
 #if _WIN32
 #pragma pack(pop)
@@ -118,7 +100,15 @@ static const char *SSL_CIPHER_LIST = "ALL:!LOW";
 typedef int socklen_t;
 #endif
 
-
+static void tcp_set_error(tcp_channel *u, int error_code, const char *format, ...)
+{
+    void (*callback)(const char *) = u ? u->error_callback : NULL;
+    va_list args;
+    va_start(args, format);
+    simple_connection_set_channel_error(u, callback, error_code, errno,
+                                        __func__, __LINE__, format, args);
+    va_end(args);
+}
 
 #ifdef ENABLE_SSL
 static SSL_CTX *ssl_initialize(tcp_channel *channel, char *sslkeyfile, char *sslcertfile)
@@ -129,40 +119,40 @@ static SSL_CTX *ssl_initialize(tcp_channel *channel, char *sslkeyfile, char *ssl
     SSL_load_error_strings();
 
     if ((ssl_context = SSL_CTX_new(TLS_server_method())) == NULL) {
- 	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SSL_CTX_NEW, "Failed to initialize SSL context.\n");
- 	goto error1;
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SSL_CTX_NEW, "Failed to initialize SSL context.\n");
+        goto error1;
     }
 
     SSL_CTX_set_options(ssl_context, SSL_OP_ALL | SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
 
     if (!SSL_CTX_set_cipher_list(ssl_context, SSL_CIPHER_LIST)) {
- 	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SSL_CIPHER_LIST, "Failed to set SSL cipher list.\n");
- 	goto error1;
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SSL_CIPHER_LIST, "Failed to set SSL cipher list.\n");
+        goto error1;
     }
 
     if (SSL_CTX_use_PrivateKey_file(ssl_context, sslkeyfile, SSL_FILETYPE_PEM) <= 0) {
- 	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SSL_PRIVATE_KEY,
- 	              "Failed to load private key file '%s'. Check file exists, is readable, and contains valid PEM format.\n",
- 	              sslkeyfile);
- 	goto error1;
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SSL_PRIVATE_KEY,
+                      "Failed to load private key file '%s'. Check file exists, is readable, and contains valid PEM format.\n",
+                      sslkeyfile);
+        goto error1;
     }
 
     if (SSL_CTX_use_certificate_file(ssl_context, sslcertfile, SSL_FILETYPE_PEM) <= 0) {
- 	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SSL_CERTIFICATE,
- 	              "Failed to load certificate file '%s'. Check file exists, is readable, and contains valid PEM format.\n",
- 	              sslcertfile);
- 	goto error1;
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SSL_CERTIFICATE,
+                      "Failed to load certificate file '%s'. Check file exists, is readable, and contains valid PEM format.\n",
+                      sslcertfile);
+        goto error1;
     }
 
     // Verify that the private key matches the certificate
     if (!SSL_CTX_check_private_key(ssl_context)) {
- 	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SSL_PRIVATE_KEY,
- 	              "Private key does not match the certificate. Ensure the key and certificate files correspond.\n");
- 	goto error1;
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SSL_PRIVATE_KEY,
+                      "Private key does not match the certificate. Ensure the key and certificate files correspond.\n");
+        goto error1;
     }
 
     return ssl_context;
- error1:
+error1:
     if (ssl_context) {
         SSL_CTX_free(ssl_context);
     }
@@ -181,8 +171,8 @@ static SSL_CTX *ssl_client_initialize(void)
     SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
 
     if (!ctx) {
-	ERR_print_errors_fp(stderr);
-	return NULL;
+        ERR_print_errors_fp(stderr);
+        return NULL;
     }
 
     return ctx;
@@ -244,14 +234,14 @@ static tcp_channel *tcp_open_server(int mode, uint16_t port, char *sslkeyfile, c
 #endif
 
     int yes = 1;
-    if(setsockopt(u->s, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(int)) == -1) {
+    if (setsockopt(u->s, SOL_SOCKET, SO_REUSEADDR, (const char *)&yes, sizeof(int)) == -1) {
         tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SETSOCKOPT, "setsockopt() error!\n");
         closesocket(u->s);
         free(u);
         return NULL;
     }
 
-    if(simple_connection_bind_socket(u->s, (struct sockaddr *)&u->my_addr, u->addrlen) == -1) {
+    if (simple_connection_bind_socket(u->s, (struct sockaddr *)&u->my_addr, u->addrlen) == -1) {
         tcp_set_error(u, SIMPLE_CONNECTION_ERROR_BIND, "bind() error!\n");
         simple_connection_close_socket(u->s);
         free(u);
@@ -416,7 +406,7 @@ tcp_channel *tcp_open(int mode, const char *addr, uint16_t port, char *sslkeyfil
 
 #ifdef _WIN32
     if (simple_connection_winsock_init())
-	return NULL;
+        return NULL;
 #endif
 
     if ((mode == TCP_SERVER) || (mode == TCP_SSL_SERVER)) {
@@ -431,32 +421,32 @@ static int tcp_write_ws(tcp_channel *u, uint8_t opcode, char *buf, size_t len);
 int tcp_close(tcp_channel *u)
 {
     if (u->s != -1) {
-	if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
-	    char buf[] = { 0, 0, 'C', 'l', 'o', 's', 'e', 'd' };
-	    *((unsigned short *)buf) = htons(1000); // WebSocket close code: 1000 (normal closure)
-	    tcp_write_ws(u, WS_OPCODE_CLOSE, buf, sizeof(buf));
-	}
+        if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
+            char buf[] = { 0, 0, 'C', 'l', 'o', 's', 'e', 'd' };
+            *((unsigned short *)buf) = htons(1000); // WebSocket close code: 1000 (normal closure)
+            tcp_write_ws(u, WS_OPCODE_CLOSE, buf, sizeof(buf));
+        }
 
 #ifdef ENABLE_SSL
-	if ((u->mode == TCP_SSL_CLIENT) || (u->mode == TCP_SSL_SERVER)) {
-	    if (u->mode == TCP_SSL_CLIENT) {
-		SSL_shutdown(u->ssl);
-		SSL_free(u->ssl);
-	    }
-	    if (u->ctx) {
-		ssl_tear_down(u->ctx);
-	    }
-	}
+        if ((u->mode == TCP_SSL_CLIENT) || (u->mode == TCP_SSL_SERVER)) {
+            if (u->mode == TCP_SSL_CLIENT) {
+                SSL_shutdown(u->ssl);
+                SSL_free(u->ssl);
+            }
+            if (u->ctx) {
+                ssl_tear_down(u->ctx);
+            }
+        }
 #endif
-	closesocket(u->s);
+        closesocket(u->s);
     }
 
     if (u->ws_path) {
-	free(u->ws_path);
+        free(u->ws_path);
     }
 
     if (u->ws) {
-	free(u->ws);
+        free(u->ws);
     }
 
     free(u);
@@ -475,46 +465,46 @@ tcp_channel *tcp_accept(tcp_channel *u)
     n->error_callback = u->error_callback;
 
     if (u->mode == TCP_SSL_SERVER) {
-	n->mode = TCP_SSL_CLIENT;
+        n->mode = TCP_SSL_CLIENT;
     } else {
-	n->mode = TCP_CLIENT;
+        n->mode = TCP_CLIENT;
     }
 
     n->primary_mode = u->mode;
 
     socklen_t l = sizeof(n->my_addr);
     if ((n->s = accept(u->s, (struct sockaddr *)&n->my_addr, &l)) < 0) {
-   	tcp_set_error(u, SIMPLE_CONNECTION_ERROR_ACCEPT, "accept()\n");
-   	free(n);
-   	return NULL;
+        tcp_set_error(u, SIMPLE_CONNECTION_ERROR_ACCEPT, "accept()\n");
+        free(n);
+        return NULL;
     }
     n->addrlen = l;
 
 #ifdef ENABLE_SSL
     if (u->mode == TCP_SSL_SERVER) {
-  	if ((n->ssl = SSL_new(u->ctx)) == NULL) {
-  	    tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SSL_NEW, "Failed to create SSL connection.\n");
-  	    closesocket(n->s);
-  	    free(n);
-  	    return NULL;
-  	}
+        if ((n->ssl = SSL_new(u->ctx)) == NULL) {
+            tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SSL_NEW, "Failed to create SSL connection.\n");
+            closesocket(n->s);
+            free(n);
+            return NULL;
+        }
 
- 	if (SSL_set_fd(n->ssl, n->s) != 1) {
-  	    tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SSL_SET_FD, "Failed to set SSL file descriptor.\n");
-  	    SSL_free(n->ssl);
-  	    closesocket(n->s);
-  	    free(n);
-  	    return NULL;
-  	}
+        if (SSL_set_fd(n->ssl, n->s) != 1) {
+            tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SSL_SET_FD, "Failed to set SSL file descriptor.\n");
+            SSL_free(n->ssl);
+            closesocket(n->s);
+            free(n);
+            return NULL;
+        }
 
-  	if (SSL_accept(n->ssl) < 0) {
-  	    tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SSL_ACCEPT, "Unable to accept SSL connection.\n");
-  	    ERR_print_errors_fp(stderr);
-  	    SSL_free(n->ssl);
-  	    closesocket(n->s);
-  	    free(n);
-  	    return NULL;
-  	}
+        if (SSL_accept(n->ssl) < 0) {
+            tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SSL_ACCEPT, "Unable to accept SSL connection.\n");
+            ERR_print_errors_fp(stderr);
+            SSL_free(n->ssl);
+            closesocket(n->s);
+            free(n);
+            return NULL;
+        }
     }
 #endif
 
@@ -527,15 +517,15 @@ static int tcp_read_internal(tcp_channel *u, char *buf, size_t len)
 
 #ifdef ENABLE_SSL
     if ((u->mode == TCP_SSL_CLIENT) || (u->mode == TCP_SSL_SERVER)) {
- 	if ((r = SSL_read(u->ssl, buf, len)) < 0) {
- 	    tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SSL_READ, "SSL_read()\n");
- 	}
+        if ((r = SSL_read(u->ssl, buf, len)) < 0) {
+            tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SSL_READ, "SSL_read()\n");
+        }
     } else
 #endif
     {
- 	if ((r = recv(u->s, buf, len, 0)) == -1) {
- 	    tcp_set_error(u, SIMPLE_CONNECTION_ERROR_RECV, "recvfrom()\n");
- 	}
+        if ((r = recv(u->s, buf, len, 0)) == -1) {
+            tcp_set_error(u, SIMPLE_CONNECTION_ERROR_RECV, "recvfrom()\n");
+        }
     }
 
     return r;
@@ -546,15 +536,15 @@ static int tcp_write_internal(tcp_channel *u, char *buf, size_t len)
     int r;
 #ifdef ENABLE_SSL
     if ((u->mode == TCP_SSL_CLIENT) || (u->mode == TCP_SSL_SERVER)) {
- 	if ((r = SSL_write(u->ssl, buf, len)) < 0) {
- 	    tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SSL_WRITE, "SSL_write()\n");
- 	}
+        if ((r = SSL_write(u->ssl, buf, len)) < 0) {
+            tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SSL_WRITE, "SSL_write()\n");
+        }
     } else
 #endif
     {
- 	if ((r = send(u->s, buf, len, 0)) < 0) {
- 	    tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SEND, "sendto()\n");
- 	}
+        if ((r = send(u->s, buf, len, 0)) < 0) {
+            tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SEND, "sendto()\n");
+        }
     }
 
     return r;
@@ -567,25 +557,25 @@ static int get_http_header(tcp_channel *channel, char *head, int headLen)
     char crlf[4] = { 0, 0, 0, 0 };
 
     while (totalRead < headLen - 1) {
-	nread = tcp_read_internal(channel, &head[totalRead], 1);
-	if (nread <= 0) {
-	    return -1;
-	}
-	crlf[0] = crlf[1];
-	crlf[1] = crlf[2];
-	crlf[2] = crlf[3];
-	crlf[3] = head[totalRead];
+        nread = tcp_read_internal(channel, &head[totalRead], 1);
+        if (nread <= 0) {
+            return -1;
+        }
+        crlf[0] = crlf[1];
+        crlf[1] = crlf[2];
+        crlf[2] = crlf[3];
+        crlf[3] = head[totalRead];
 
-	totalRead += nread;
+        totalRead += nread;
 
-	// Check for HTTP header end: \r\n\r\n (CRLF CRLF)
-	if (crlf[0] == 13 && crlf[1] == 10 && crlf[2] == 13 && crlf[3] == 10) {
-	    break;
-	    }
+        // Check for HTTP header end: \r\n\r\n (CRLF CRLF)
+        if (crlf[0] == 13 && crlf[1] == 10 && crlf[2] == 13 && crlf[3] == 10) {
+            break;
+        }
 
-	if (crlf[2] == 10 && crlf[3] == 10) {
-	    break;
-	}
+        if (crlf[2] == 10 && crlf[3] == 10) {
+            break;
+        }
     }
 
     head[totalRead] = 0;
@@ -596,14 +586,14 @@ static int get_http_header(tcp_channel *channel, char *head, int headLen)
 static char *copy_string(tcp_channel *u, char *dst, int dstSize, char *src, int srcSize)
 {
     if (!dst) {
-	dstSize = srcSize;
-	dst = malloc(dstSize + 1);
-	if (!dst) {
-	    tcp_set_error(u, SIMPLE_CONNECTION_ERROR_MALLOC, "malloc() failed\n");
-	    return NULL;
-	}
+        dstSize = srcSize;
+        dst = malloc(dstSize + 1);
+        if (!dst) {
+            tcp_set_error(u, SIMPLE_CONNECTION_ERROR_MALLOC, "malloc() failed\n");
+            return NULL;
+        }
     } else {
-	dstSize = (srcSize > dstSize) ? dstSize : srcSize;
+        dstSize = (srcSize > dstSize) ? dstSize : srcSize;
     }
     memcpy(dst, src, dstSize);
     dst[dstSize] = 0;
@@ -613,20 +603,20 @@ static char *copy_string(tcp_channel *u, char *dst, int dstSize, char *src, int 
 static char *header_get_field(tcp_channel *channel, char *header, char *field, char *str, int n)
 {
     while (*header) {
-	if (strcasestr(header, field) == header && *(header + strlen(field)) == ':') {
-	    char *tmp1 = header + strlen(field) + 1;
-	    for (tmp1++; *tmp1 == ' '; tmp1++) ;
-	    char *tmp;
-	    for (tmp = tmp1; *tmp != 0 && *tmp != '\n' && *tmp != '\r'; tmp++) ;
-	    return copy_string(channel, str, n, tmp1, tmp - tmp1);
-	}
+        if (strcasestr(header, field) == header && *(header + strlen(field)) == ':') {
+            char *tmp1 = header + strlen(field) + 1;
+            for (tmp1++; *tmp1 == ' '; tmp1++) ;
+            char *tmp;
+            for (tmp = tmp1; *tmp != 0 && *tmp != '\n' && *tmp != '\r'; tmp++) ;
+            return copy_string(channel, str, n, tmp1, tmp - tmp1);
+        }
 
-	while (*header && *header != '\r' && *header != '\n') {
-	    header++;
-	}
-	while (*header && (*header == '\r' || *header == '\n')) {
-	    header++;
-	}
+        while (*header && *header != '\r' && *header != '\n') {
+            header++;
+        }
+        while (*header && (*header == '\r' || *header == '\n')) {
+            header++;
+        }
     }
     return NULL;
 }
@@ -635,13 +625,13 @@ static char *header_get_path(tcp_channel *channel, char *header, char *str, int 
 {
     char *tmp = strchr(header, ' ');
     if (tmp) {
-	char *tmp1 = strchr(tmp + 1, ' ');
-	if (tmp1) {
-	    return copy_string(channel, str, n, tmp + 1, tmp1 - tmp - 1);
-	}
+        char *tmp1 = strchr(tmp + 1, ' ');
+        if (tmp1) {
+            return copy_string(channel, str, n, tmp + 1, tmp1 - tmp - 1);
+        }
     }
     if (str) {
-	str[0] = 0;
+        str[0] = 0;
     }
     return NULL;
 }
@@ -661,54 +651,54 @@ static int http_ws_method_server(tcp_channel *channel, char *request, size_t len
 #endif
 
     if (request) {
-	*request = 0;
+        *request = 0;
     }
 
     if (get_http_header(channel, req, sizeof(req)) <= 0) {
-	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR, "%s: get_http_header()\n", __func__);
-	return 0;
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR, "%s: get_http_header()\n", __func__);
+        return 0;
     }
 
     if (request && len) {
-	snprintf(request, len, "%s", req);
+        snprintf(request, len, "%s", req);
     }
 
     if (!header_get_field(channel, req, "Upgrade", field, sizeof(field))) {
-	return 0;
+        return 0;
     }
 
     if (strcasecmp(field, "websocket")) {
-	return 0;
+        return 0;
     }
 
     if (!header_get_field(channel, req, "Connection", field, sizeof(field))) {
-	return 0;
+        return 0;
     }
 
     if (!strcasestr(field, "Upgrade")) {
-	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR, "wrong Connection [%s]\n", field);
-	return 0;
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR, "wrong Connection [%s]\n", field);
+        return 0;
     }
 
     if (!header_get_path(channel, req, field, sizeof(field))) {
-	return 0;
+        return 0;
     }
 
     if (channel->path) {
-	if (strcmp(field, channel->path)) {
-	    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR, "wrong path [%s]\n", field);
-	    return 0;
-	}
+        if (strcmp(field, channel->path)) {
+            tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR, "wrong path [%s]\n", field);
+            return 0;
+        }
     } else {
-	channel->ws_path = strdup(field);
-	if (!channel->ws_path) {
-	    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_STRDUP, "strdup() failed\n");
-	    return 0;
-	}
+        channel->ws_path = strdup(field);
+        if (!channel->ws_path) {
+            tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_STRDUP, "strdup() failed\n");
+            return 0;
+        }
     }
 
     if (!header_get_field(channel, req, "Sec-WebSocket-Key", field, sizeof(field))) {
-	return 0;
+        return 0;
     }
 
     strncat(field, WS_HANDSHAKE_UUID, sizeof(field) - 1);
@@ -721,17 +711,20 @@ static int http_ws_method_server(tcp_channel *channel, char *request, size_t len
     char *key_b64 = (char *)simple_connection_base64_encode((const unsigned char *)field, strlen(field), NULL);
 #endif
 
-    snprintf(req, sizeof(req), "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\nSec-WebSocket-Protocol: binary\r\n\r\n",
-	    key_b64);
+    snprintf(req, sizeof(req),
+             "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+             "Connection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n"
+             "Sec-WebSocket-Protocol: binary\r\n\r\n",
+             key_b64);
 
     free(key_b64);
 
     if (tcp_write_internal(channel, req, strlen(req)) != strlen(req)) {
-	if (request) {
-	    *request = 0;
-	}
-	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SEND, "%s: tcp_write()\n", __func__);
-	return 0;
+        if (request) {
+            *request = 0;
+        }
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SEND, "%s: tcp_write()\n", __func__);
+        return 0;
     }
 
     return 1;
@@ -743,32 +736,35 @@ static int http_ws_method_client(tcp_channel *channel)
     char req[HTTP_HEADER_MAX_SIZE];
 
     if (simple_connection_get_random(key, WS_KEY_LEN, 0) == -1) {
-	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_INVALID_MODE, "%s: get_random()\n", __func__);
-	return 0;
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_INVALID_MODE, "%s: get_random()\n", __func__);
+        return 0;
     }
 
     char *key_b64 = (char *)simple_connection_base64_encode((const unsigned char *)key, WS_KEY_LEN, NULL);
 
-    snprintf(req, sizeof(req), "GET %s HTTP/1.1\r\nHost: %s\r\nSec-WebSocket-Version: 13\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: %s\r\nSec-WebSocket-Protocol: binary\r\n\r\n",
-	    channel->path ? channel->path : "/", channel->host, key_b64);
+    snprintf(req, sizeof(req),
+             "GET %s HTTP/1.1\r\nHost: %s\r\nSec-WebSocket-Version: 13\r\n"
+             "Upgrade: websocket\r\nConnection: Upgrade\r\n"
+             "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Protocol: binary\r\n\r\n",
+             channel->path ? channel->path : "/", channel->host, key_b64);
 
     free(key_b64);
 
     if (tcp_write_internal(channel, req, strlen(req)) != strlen(req)) {
-	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SEND, "%s: tcp_write()\n", __func__);
-	return 0;
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SEND, "%s: tcp_write()\n", __func__);
+        return 0;
     }
 
     if (get_http_header(channel, req, sizeof(req)) <= 0) {
-	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR, "%s: get_http_header()\n", __func__);
-	return 0;
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR, "%s: get_http_header()\n", __func__);
+        return 0;
     }
 
     static const char *reply = "HTTP/1.1 101 Switching Protocols";
 
     if (strncasecmp(req, reply, strlen(reply))) {
-	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_HANDSHAKE, "\nwebsocket error\n");
-	return 0;
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_HANDSHAKE, "\nwebsocket error\n");
+        return 0;
     }
 
     return 1;
@@ -777,29 +773,29 @@ static int http_ws_method_client(tcp_channel *channel)
 int tcp_connection_upgrade(tcp_channel *u, int connection_method, const char *path, char *request, size_t len)
 {
     if (connection_method == SIMPLE_CONNECTION_METHOD_WS) {
-	ws_t *ws = malloc(sizeof(ws_t));
-	if (!ws) {
-	    tcp_set_error(u, SIMPLE_CONNECTION_ERROR_MALLOC, "malloc() failed\n");
-	    return 0;
-	}
-	ws->avail = 0;
-	ws->pos = 0;
-    u->path = path;
-	if ((u->primary_mode == TCP_SSL_CLIENT) || (u->primary_mode == TCP_CLIENT)) {
-	    if (http_ws_method_client(u)) {
-		u->connection_method = connection_method;
-		u->ws = ws;
-		return 1;
-	    }
-	} else if ((u->primary_mode == TCP_SSL_SERVER) || (u->primary_mode == TCP_SERVER)) {
-	    if (http_ws_method_server(u, request, len)) {
-		u->connection_method = connection_method;
-		u->ws = ws;
-		return 1;
-	    }
-	}
-	free(ws);
-	return 0;
+        ws_t *ws = malloc(sizeof(ws_t));
+        if (!ws) {
+            tcp_set_error(u, SIMPLE_CONNECTION_ERROR_MALLOC, "malloc() failed\n");
+            return 0;
+        }
+        ws->avail = 0;
+        ws->pos = 0;
+        u->path = path;
+        if ((u->primary_mode == TCP_SSL_CLIENT) || (u->primary_mode == TCP_CLIENT)) {
+            if (http_ws_method_client(u)) {
+                u->connection_method = connection_method;
+                u->ws = ws;
+                return 1;
+            }
+        } else if ((u->primary_mode == TCP_SSL_SERVER) || (u->primary_mode == TCP_SERVER)) {
+            if (http_ws_method_server(u, request, len)) {
+                u->connection_method = connection_method;
+                u->ws = ws;
+                return 1;
+            }
+        }
+        free(ws);
+        return 0;
     }
 
     return 1;
@@ -815,32 +811,32 @@ static int send_ws_header(tcp_channel *channel, uint8_t opcode, int len)
     ws->header.b0 = 0x80 | (opcode & 0x0f);
     // WebSocket payload length encoding (RFC 6455)
     if (blen <= 125) {  // Length fits in 7 bits
-	ws->header.b1 = (uint8_t)blen;
-	mask = ws->header.u.m.c;
-	sz = 2;
+        ws->header.b1 = (uint8_t)blen;
+        mask = ws->header.u.m.c;
+        sz = 2;
     } else if (blen <= 65535) {  // Length fits in 16 bits
-	ws->header.b1 = 0x7e;
-	ws->header.u.s16.l16 = WS_HTON16((uint16_t)blen);
-	mask = ws->header.u.s16.m16.c;
-	sz = 4;
+        ws->header.b1 = 0x7e;
+        ws->header.u.s16.l16 = WS_HTON16((uint16_t)blen);
+        mask = ws->header.u.s16.m16.c;
+        sz = 4;
     } else {  // Length needs 64 bits
-	ws->header.u.s64.l64 = WS_HTON64(blen);
-	mask = ws->header.u.s64.m64.c;
-	sz = 10;
+        ws->header.u.s64.l64 = WS_HTON64(blen);
+        mask = ws->header.u.s64.m64.c;
+        sz = 10;
     }
 
     if (channel->primary_mode == TCP_CLIENT || channel->primary_mode == TCP_SSL_CLIENT) {
-	ws->header.b1 |= 0x80; // mask flag
-	sz += 4;
-	if (simple_connection_get_random(mask, 4, 0) == -1) {
-	    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_INVALID_MODE, "%s: get_random()\n", __func__);
-	    return 0;
-	}
+        ws->header.b1 |= 0x80; // mask flag
+        sz += 4;
+        if (simple_connection_get_random(mask, 4, 0) == -1) {
+            tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_INVALID_MODE, "%s: get_random()\n", __func__);
+            return 0;
+        }
     }
 
     if (tcp_write_internal(channel, (char *)&ws->header, sz) != sz) {
-	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SEND, "%s: tcp_write()\n", __func__);
-	return 0;
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SEND, "%s: tcp_write()\n", __func__);
+        return 0;
     }
 
     return 1;
@@ -852,7 +848,7 @@ static void ws_mask_data(ws_t *ws, char *data, int len)
     unsigned char *mask;
 
     if (!(ws->header.b1 & 0x80)) {
-	return;
+        return;
     }
 
     switch (ws->header.b1 & 0x7f) {
@@ -862,7 +858,7 @@ static void ws_mask_data(ws_t *ws, char *data, int len)
     }
 
     for (i = 0; i < len; i++) {
-      data[i] ^= mask[(ws->pos + i) % 4];
+        data[i] ^= mask[(ws->pos + i) % 4];
     }
 }
 
@@ -873,184 +869,184 @@ static int recv_ws_header(tcp_channel *channel)
     ws_t *ws = channel->ws;
 
     if (tcp_read_internal(channel, (char *)&ws->header.b0, 1) != 1) {
-	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: tcp_read()\n", __func__);
-	return 0;
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: tcp_read()\n", __func__);
+        return 0;
     }
 
     if (tcp_read_internal(channel, (char *)&ws->header.b1, 1) != 1) {
-	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: tcp_read()\n", __func__);
-	return 0;
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: tcp_read()\n", __func__);
+        return 0;
     }
 
-	if ((ws->header.b0 != (0x80 | WS_OPCODE_BINARY_FRAME)) &&
-	(ws->header.b0 != (0x80 | WS_OPCODE_CLOSE)) &&
-	(ws->header.b0 != WS_OPCODE_CONTINUATION) &&
-	(ws->header.b0 != (0x80 | WS_OPCODE_PING)) &&
-	(ws->header.b0 != (0x80 | WS_OPCODE_PONG))) {
-	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_INVALID_OPCODE, "Unknown ws opcode %02X %02X\n", ws->header.b0, ws->header.b1);
-	return 0;
+    if ((ws->header.b0 != (0x80 | WS_OPCODE_BINARY_FRAME)) &&
+            (ws->header.b0 != (0x80 | WS_OPCODE_CLOSE)) &&
+            (ws->header.b0 != WS_OPCODE_CONTINUATION) &&
+            (ws->header.b0 != (0x80 | WS_OPCODE_PING)) &&
+            (ws->header.b0 != (0x80 | WS_OPCODE_PONG))) {
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_INVALID_OPCODE, "Unknown ws opcode %02X %02X\n", ws->header.b0, ws->header.b1);
+        return 0;
     }
 
     if (ws->header.b0 == WS_OPCODE_CONTINUATION) {
-	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR, "Continuation %02X %02X\n", ws->header.b0, ws->header.b1);
-	if ((ws->header.b1 & 0x7f) == 0) {
-	    return recv_ws_header(channel);
-	}
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR, "Continuation %02X %02X\n", ws->header.b0, ws->header.b1);
+        if ((ws->header.b1 & 0x7f) == 0) {
+            return recv_ws_header(channel);
+        }
     }
 
     if (ws->header.b0 == (0x80 | WS_OPCODE_CLOSE)) {
-	char buf[ws->header.b1 + 1];
-	buf[ws->header.b1] = 0;
-	if (tcp_read_internal(channel, buf, ws->header.b1) != ws->header.b1) {
-	    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: tcp_read()\n", __func__);
-	    return 0;
-	}
+        char buf[ws->header.b1 + 1];
+        buf[ws->header.b1] = 0;
+        if (tcp_read_internal(channel, buf, ws->header.b1) != ws->header.b1) {
+            tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: tcp_read()\n", __func__);
+            return 0;
+        }
 
-	tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_CONNECTION_CLOSED, "Connection closed [%s]\n", buf + 2);
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_CONNECTION_CLOSED, "Connection closed [%s]\n", buf + 2);
 
-	return 0;
+        return 0;
     }
 
     if (ws->header.b0 == (0x80 | WS_OPCODE_PING)) {
-	char *buf = NULL;
-	int ping_len = 0;
-	if ((ws->header.b1 & 0x7f) == 0x7e) {
-	    if (tcp_read_internal(channel, (char *)&ws->header.u.s16.l16, 2) != 2) {
-		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: ping 0x7e - tcp_read()\n", __func__);
-		return 0;
-	    }
-	    ping_len = WS_NTOH16(ws->header.u.s16.l16);
-	} else if ((ws->header.b1 & 0x7f) == 0x7f) {
-	    if (tcp_read_internal(channel, (char *)&ws->header.u.s64.l64, 8) != 8) {
-		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: ping 0x7f - tcp_read()\n", __func__);
-		return 0;
-	    }
-	    ping_len = WS_NTOH64(ws->header.u.s64.l64);
-	} else {
-	    ping_len = ws->header.b1 & 0x7f;
-	}
-	if (ws->header.b1 & 0x80) {
-	    if ((ws->header.b1 & 0x7f) == 0x7e) {
-		if (tcp_read_internal(channel, (char *)ws->header.u.s16.m16.c, 4) != 4) {
-		    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: ping 0x7e mask - tcp_read()\n", __func__);
-		    return 0;
-		}
-	    } else if ((ws->header.b1 & 0x7f) == 0x7f) {
-		if (tcp_read_internal(channel, (char *)ws->header.u.s64.m64.c, 4) != 4) {
-		    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: ping 0x7f mask - tcp_read()\n", __func__);
-		    return 0;
-		}
-	    } else {
-		if (tcp_read_internal(channel, (char *)ws->header.u.m.c, 4) != 4) {
-		    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: ping mask - tcp_read()\n", __func__);
-		    return 0;
-		}
-	    }
-	}
-	if (ping_len > 0) {
-	    buf = malloc(ping_len);
-	    if (!buf) {
-		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_MALLOC, "malloc() failed for ping payload\n");
-		return 0;
-	    }
-	    if (tcp_read_internal(channel, buf, ping_len) != ping_len) {
-		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: ping payload - tcp_read()\n", __func__);
-		free(buf);
-		return 0;
-	    }
-	    ws_mask_data(ws, buf, ping_len);
-	}
-	if (!tcp_write_ws(channel, WS_OPCODE_PONG, buf, ping_len)) {
-	    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SEND, "Failed to send PONG\n");
-	}
-	if (buf) free(buf);
-	return -1;
+        char *buf = NULL;
+        int ping_len = 0;
+        if ((ws->header.b1 & 0x7f) == 0x7e) {
+            if (tcp_read_internal(channel, (char *)&ws->header.u.s16.l16, 2) != 2) {
+                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: ping 0x7e - tcp_read()\n", __func__);
+                return 0;
+            }
+            ping_len = WS_NTOH16(ws->header.u.s16.l16);
+        } else if ((ws->header.b1 & 0x7f) == 0x7f) {
+            if (tcp_read_internal(channel, (char *)&ws->header.u.s64.l64, 8) != 8) {
+                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: ping 0x7f - tcp_read()\n", __func__);
+                return 0;
+            }
+            ping_len = WS_NTOH64(ws->header.u.s64.l64);
+        } else {
+            ping_len = ws->header.b1 & 0x7f;
+        }
+        if (ws->header.b1 & 0x80) {
+            if ((ws->header.b1 & 0x7f) == 0x7e) {
+                if (tcp_read_internal(channel, (char *)ws->header.u.s16.m16.c, 4) != 4) {
+                    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: ping 0x7e mask - tcp_read()\n", __func__);
+                    return 0;
+                }
+            } else if ((ws->header.b1 & 0x7f) == 0x7f) {
+                if (tcp_read_internal(channel, (char *)ws->header.u.s64.m64.c, 4) != 4) {
+                    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: ping 0x7f mask - tcp_read()\n", __func__);
+                    return 0;
+                }
+            } else {
+                if (tcp_read_internal(channel, (char *)ws->header.u.m.c, 4) != 4) {
+                    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: ping mask - tcp_read()\n", __func__);
+                    return 0;
+                }
+            }
+        }
+        if (ping_len > 0) {
+            buf = malloc(ping_len);
+            if (!buf) {
+                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_MALLOC, "malloc() failed for ping payload\n");
+                return 0;
+            }
+            if (tcp_read_internal(channel, buf, ping_len) != ping_len) {
+                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: ping payload - tcp_read()\n", __func__);
+                free(buf);
+                return 0;
+            }
+            ws_mask_data(ws, buf, ping_len);
+        }
+        if (!tcp_write_ws(channel, WS_OPCODE_PONG, buf, ping_len)) {
+            tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SEND, "Failed to send PONG\n");
+        }
+        if (buf) free(buf);
+        return -1;
     }
 
     if (ws->header.b0 == (0x80 | WS_OPCODE_PONG)) {
-	int pong_len = 0;
-	if ((ws->header.b1 & 0x7f) == 0x7e) {
-	    if (tcp_read_internal(channel, (char *)&ws->header.u.s16.l16, 2) != 2) {
-		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: pong 0x7e - tcp_read()\n", __func__);
-		return 0;
-	    }
-	    pong_len = WS_NTOH16(ws->header.u.s16.l16);
-	} else if ((ws->header.b1 & 0x7f) == 0x7f) {
-	    if (tcp_read_internal(channel, (char *)&ws->header.u.s64.l64, 8) != 8) {
-		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: pong 0x7f - tcp_read()\n", __func__);
-		return 0;
-	    }
-	    pong_len = WS_NTOH64(ws->header.u.s64.l64);
-	} else {
-	    pong_len = ws->header.b1 & 0x7f;
-	}
-	if (ws->header.b1 & 0x80) {
-	    if ((ws->header.b1 & 0x7f) == 0x7e) {
-		if (tcp_read_internal(channel, (char *)ws->header.u.s16.m16.c, 4) != 4) {
-		    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: pong 0x7e mask - tcp_read()\n", __func__);
-		    return 0;
-		}
-	    } else if ((ws->header.b1 & 0x7f) == 0x7f) {
-		if (tcp_read_internal(channel, (char *)ws->header.u.s64.m64.c, 4) != 4) {
-		    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: pong 0x7f mask - tcp_read()\n", __func__);
-		    return 0;
-		}
-	    } else {
-		if (tcp_read_internal(channel, (char *)ws->header.u.m.c, 4) != 4) {
-		    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: pong mask - tcp_read()\n", __func__);
-		    return 0;
-		}
-	    }
-	}
-	if (pong_len > 0) {
-	    char *discard = malloc(pong_len);
-	    if (!discard) {
-		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_MALLOC, "malloc() failed for pong discard\n");
-		return 0;
-	    }
-	    if (tcp_read_internal(channel, discard, pong_len) != pong_len) {
-		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: pong payload - tcp_read()\n", __func__);
-		free(discard);
-		return 0;
-	    }
-	    free(discard);
-	}
-	return -1;
+        int pong_len = 0;
+        if ((ws->header.b1 & 0x7f) == 0x7e) {
+            if (tcp_read_internal(channel, (char *)&ws->header.u.s16.l16, 2) != 2) {
+                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: pong 0x7e - tcp_read()\n", __func__);
+                return 0;
+            }
+            pong_len = WS_NTOH16(ws->header.u.s16.l16);
+        } else if ((ws->header.b1 & 0x7f) == 0x7f) {
+            if (tcp_read_internal(channel, (char *)&ws->header.u.s64.l64, 8) != 8) {
+                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: pong 0x7f - tcp_read()\n", __func__);
+                return 0;
+            }
+            pong_len = WS_NTOH64(ws->header.u.s64.l64);
+        } else {
+            pong_len = ws->header.b1 & 0x7f;
+        }
+        if (ws->header.b1 & 0x80) {
+            if ((ws->header.b1 & 0x7f) == 0x7e) {
+                if (tcp_read_internal(channel, (char *)ws->header.u.s16.m16.c, 4) != 4) {
+                    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: pong 0x7e mask - tcp_read()\n", __func__);
+                    return 0;
+                }
+            } else if ((ws->header.b1 & 0x7f) == 0x7f) {
+                if (tcp_read_internal(channel, (char *)ws->header.u.s64.m64.c, 4) != 4) {
+                    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: pong 0x7f mask - tcp_read()\n", __func__);
+                    return 0;
+                }
+            } else {
+                if (tcp_read_internal(channel, (char *)ws->header.u.m.c, 4) != 4) {
+                    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: pong mask - tcp_read()\n", __func__);
+                    return 0;
+                }
+            }
+        }
+        if (pong_len > 0) {
+            char *discard = malloc(pong_len);
+            if (!discard) {
+                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_MALLOC, "malloc() failed for pong discard\n");
+                return 0;
+            }
+            if (tcp_read_internal(channel, discard, pong_len) != pong_len) {
+                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: pong payload - tcp_read()\n", __func__);
+                free(discard);
+                return 0;
+            }
+            free(discard);
+        }
+        return -1;
     }
 
     if ((ws->header.b1 & 0x7f) == 0x7e) {
-	if (tcp_read_internal(channel, (char *)&ws->header.u.s16.l16, 2) != 2) {
-	    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: 0x7e - tcp_read()\n", __func__);
-	    return 0;
-	}
-	len = WS_NTOH16(ws->header.u.s16.l16);
+        if (tcp_read_internal(channel, (char *)&ws->header.u.s16.l16, 2) != 2) {
+            tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: 0x7e - tcp_read()\n", __func__);
+            return 0;
+        }
+        len = WS_NTOH16(ws->header.u.s16.l16);
     } else if ((ws->header.b1 & 0x7f) == 0x7f) {
-	if (tcp_read_internal(channel, (char *)&ws->header.u.s64.l64, 8) != 8) {
-	    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: 0x7f - tcp_read()\n", __func__);
-	    return 0;
-	}
-	len = WS_NTOH64(ws->header.u.s64.l64);
+        if (tcp_read_internal(channel, (char *)&ws->header.u.s64.l64, 8) != 8) {
+            tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: 0x7f - tcp_read()\n", __func__);
+            return 0;
+        }
+        len = WS_NTOH64(ws->header.u.s64.l64);
     } else {
-	len = ws->header.b1 & 0x7f;
+        len = ws->header.b1 & 0x7f;
     }
 
     if (ws->header.b1 & 0x80) {
-	if ((ws->header.b1 & 0x7f) == 0x7e) {
-	    if (tcp_read_internal(channel, (char *)ws->header.u.s16.m16.c, 4) != 4) {
-		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: 0x7e mask - tcp_read()\n", __func__);
-		return 0;
-	    }
-	} else if ((ws->header.b1 & 0x7f) == 0x7f) {
-	    if (tcp_read_internal(channel, (char *)ws->header.u.s64.m64.c, 4) != 4) {
-		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: 0x7f mask - tcp_read()\n", __func__);
-		return 0;
-	    }
-	} else {
-	    if (tcp_read_internal(channel, (char *)ws->header.u.m.c, 4) != 4) {
-		tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: mask - tcp_read()\n", __func__);
-		return 0;
-	    }
-	}
+        if ((ws->header.b1 & 0x7f) == 0x7e) {
+            if (tcp_read_internal(channel, (char *)ws->header.u.s16.m16.c, 4) != 4) {
+                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: 0x7e mask - tcp_read()\n", __func__);
+                return 0;
+            }
+        } else if ((ws->header.b1 & 0x7f) == 0x7f) {
+            if (tcp_read_internal(channel, (char *)ws->header.u.s64.m64.c, 4) != 4) {
+                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: 0x7f mask - tcp_read()\n", __func__);
+                return 0;
+            }
+        } else {
+            if (tcp_read_internal(channel, (char *)ws->header.u.m.c, 4) != 4) {
+                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV, "%s: mask - tcp_read()\n", __func__);
+                return 0;
+            }
+        }
     }
 
     return len;
@@ -1069,7 +1065,7 @@ static int tcp_write_ws(tcp_channel *u, uint8_t opcode, char *buf, size_t len)
 
     if (!send_ws_header(u, opcode, len)) {
         if (tmp) free(tmp);
-	return 0;
+        return 0;
     }
     ws_t *ws = u->ws;
     ws->pos = 0;
@@ -1079,13 +1075,13 @@ static int tcp_write_ws(tcp_channel *u, uint8_t opcode, char *buf, size_t len)
     }
 
     if (len > 0 && (u->primary_mode == TCP_CLIENT || u->primary_mode == TCP_SSL_CLIENT)) {
-	ws_mask_data(u->ws, tmp, len);
+        ws_mask_data(u->ws, tmp, len);
     }
 
     if (tcp_write_internal(u, tmp ? tmp : "", len) != len) {
-	tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SEND, "tcp_write() failed\n");
+        tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SEND, "tcp_write() failed\n");
         if (tmp) free(tmp);
-	return 0;
+        return 0;
     }
 
     if (tmp) free(tmp);
@@ -1096,12 +1092,12 @@ static int tcp_write_ws(tcp_channel *u, uint8_t opcode, char *buf, size_t len)
 int tcp_write(tcp_channel *u, void *buf, size_t len)
 {
     if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
-	return tcp_write_ws(u, WS_OPCODE_BINARY_FRAME, buf, len);
+        return tcp_write_ws(u, WS_OPCODE_BINARY_FRAME, buf, len);
     }
 
     if (tcp_write_internal(u, buf, len) != len) {
-	tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SEND, "tcp_write()\n");
-	return 0;
+        tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SEND, "tcp_write()\n");
+        return 0;
     }
 
     return len;
@@ -1150,10 +1146,10 @@ int tcp_read(tcp_channel *u, void *buf, size_t len)
 int tcp_ping(tcp_channel *u, void *buf, size_t len)
 {
     if (u->connection_method != SIMPLE_CONNECTION_METHOD_WS) {
-	return -1;
+        return -1;
     }
     if (!buf && len > 0) {
-	return -1;
+        return -1;
     }
     return tcp_write_ws(u, WS_OPCODE_PING, buf, len);
 }
@@ -1161,7 +1157,7 @@ int tcp_ping(tcp_channel *u, void *buf, size_t len)
 int tcp_pong(tcp_channel *u, void *buf, size_t len)
 {
     if (u->connection_method != SIMPLE_CONNECTION_METHOD_WS) {
-	return -1;
+        return -1;
     }
     return tcp_write_ws(u, WS_OPCODE_PONG, buf, len);
 }

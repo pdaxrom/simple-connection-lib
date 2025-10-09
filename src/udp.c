@@ -1,7 +1,7 @@
 /*
  *  UDP IO wrapper
  *
- *  Copyright (c) 2008-2021 Alexander Chukov <sashz@pdaXrom.org>
+ *  Copyright (c) 2008-2025 Alexander Chukov <sashz@pdaXrom.org>
  *
  *  Permission is hereby granted, free of charge, to any person obtaining a copy
  *  of this software and associated documentation files (the "Software"), to deal
@@ -34,7 +34,9 @@
 #include "errors.h"
 #include "socket_utils.h"
 
-
+#ifdef _WIN32
+typedef int socklen_t;
+#endif
 
 static void udp_set_error(udp_channel *u, int error_code, const char *format, ...)
 {
@@ -42,13 +44,9 @@ static void udp_set_error(udp_channel *u, int error_code, const char *format, ..
     va_list args;
     va_start(args, format);
     simple_connection_set_channel_error(u, callback, error_code, errno,
-                                      __func__, __LINE__, format, args);
+                                        __func__, __LINE__, format, args);
     va_end(args);
 }
-
-#ifdef _WIN32
-typedef int socklen_t;
-#endif
 
 static udp_channel *udp_open_server(uint16_t port)
 {
@@ -206,7 +204,7 @@ udp_channel *udp_open(int mode, char *addr, uint16_t port)
 
 #ifdef _WIN32
     if (simple_connection_winsock_init())
-	return NULL;
+        return NULL;
 #endif
 
     if (mode == UDP_SERVER) {
@@ -219,22 +217,22 @@ udp_channel *udp_open(int mode, char *addr, uint16_t port)
 int udp_close(udp_channel *u)
 {
     if (u->forward) {
-	udp_forward *tmp;
-	while (u->forward) {
-	    tmp = u->forward->next;
-	    free(u->forward->label);
-	    free(u->forward);
-	    u->forward = tmp;
-	}
+        udp_forward *tmp;
+        while (u->forward) {
+            tmp = u->forward->next;
+            free(u->forward->label);
+            free(u->forward);
+            u->forward = tmp;
+        }
     }
     if (u->inp_addr) {
-	free(u->inp_addr);
+        free(u->inp_addr);
     }
     if (u->out_addr) {
-	free(u->out_addr);
+        free(u->out_addr);
     }
     if (u->s != -1) {
-	closesocket(u->s);
+        closesocket(u->s);
     }
     free(u);
 
@@ -248,15 +246,15 @@ int udp_read(udp_channel *u, void *buf, size_t len)
 
     if (u->mode == UDP_SERVER) {
         if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)u->inp_addr, &slen)) == -1) {
-     	    udp_set_error(u, SIMPLE_CONNECTION_ERROR_RECVFROM, "recvfrom()\n");
- 	}
- 	*u->out_addr = *u->inp_addr;
- 	u->out_addrlen = slen;
+            udp_set_error(u, SIMPLE_CONNECTION_ERROR_RECVFROM, "recvfrom()\n");
+        }
+        *u->out_addr = *u->inp_addr;
+        u->out_addrlen = slen;
     } else {
         slen = u->my_addrlen;
         if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, &slen))==-1) {
- 	    udp_set_error(u, SIMPLE_CONNECTION_ERROR_RECVFROM, "recvfrom()\n");
- 	}
+            udp_set_error(u, SIMPLE_CONNECTION_ERROR_RECVFROM, "recvfrom()\n");
+        }
     }
 
     return r;
@@ -269,14 +267,14 @@ int udp_write(udp_channel *u, void *buf, size_t len)
 
     if (u->mode == UDP_SERVER) {
         slen = u->out_addrlen;
- 	if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)u->out_addr, slen)) < 0) {
- 	    udp_set_error(u, SIMPLE_CONNECTION_ERROR_SENDTO, "sendto()\n");
- 	}
+        if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)u->out_addr, slen)) < 0) {
+            udp_set_error(u, SIMPLE_CONNECTION_ERROR_SENDTO, "sendto()\n");
+        }
     } else {
         slen = u->my_addrlen;
- 	if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, slen)) == -1) {
- 	    udp_set_error(u, SIMPLE_CONNECTION_ERROR_SENDTO, "sendto()\n");
- 	}
+        if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, slen)) == -1) {
+            udp_set_error(u, SIMPLE_CONNECTION_ERROR_SENDTO, "sendto()\n");
+        }
     }
 
     return r;
@@ -290,13 +288,13 @@ int udp_read_src(udp_channel *u, void *buf, size_t len)
     if (u->mode == UDP_SERVER) {
         slen = u->inp_addrlen;
         if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)u->inp_addr, &slen)) == -1) {
-    	    udp_set_error(u, SIMPLE_CONNECTION_ERROR_RECVFROM, "recvfrom()\n");
-	}
+            udp_set_error(u, SIMPLE_CONNECTION_ERROR_RECVFROM, "recvfrom()\n");
+        }
     } else {
         slen = u->my_addrlen;
         if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)&u->my_addr, &slen))==-1) {
-	    udp_set_error(u, SIMPLE_CONNECTION_ERROR_RECVFROM, "recvfrom()\n");
-	}
+            udp_set_error(u, SIMPLE_CONNECTION_ERROR_RECVFROM, "recvfrom()\n");
+        }
     }
 
     return r;
@@ -305,31 +303,31 @@ int udp_read_src(udp_channel *u, void *buf, size_t len)
 void udp_commit_dst(udp_channel *u)
 {
     if (u->mode == UDP_SERVER) {
-	*u->out_addr = *u->inp_addr;
+        *u->out_addr = *u->inp_addr;
     }
 }
 
 int udp_forward_add(udp_channel *u, char *label)
 {
     if (u->mode != UDP_SERVER) {
-	return 0;
+        return 0;
     }
 
     udp_forward *fwd = u->forward;
     udp_forward *prev = NULL;
     while (fwd) {
-	if (!strcmp(fwd->label, label)) {
-	    fwd->used++;
-	    return 0;
-	}
-	prev = fwd;
-	fwd = fwd->next;
+        if (!strcmp(fwd->label, label)) {
+            fwd->used++;
+            return 0;
+        }
+        prev = fwd;
+        fwd = fwd->next;
     }
 
     fwd = (udp_forward *) malloc(sizeof(udp_forward));
     if (!fwd) {
         udp_set_error(u, SIMPLE_CONNECTION_ERROR_MALLOC, "malloc() failed\n");
-	return -1;
+        return -1;
     }
     fwd->addr = *u->inp_addr;
     fwd->addrlen = u->inp_addrlen;
@@ -344,9 +342,9 @@ int udp_forward_add(udp_channel *u, char *label)
     fwd->next = NULL;
 
     if (prev) {
-	prev->next = fwd;
+        prev->next = fwd;
     } else {
-	u->forward = fwd;
+        u->forward = fwd;
     }
 
     return 0;
@@ -355,23 +353,23 @@ int udp_forward_add(udp_channel *u, char *label)
 int udp_forward_write(udp_channel *u, char *label, void *buf, size_t len)
 {
     if (u->mode != UDP_SERVER) {
-	return 0;
+        return 0;
     }
 
     udp_forward *fwd = u->forward;
     while(fwd) {
-	if (!strcmp(fwd->label, label)) {
-	    socklen_t slen = fwd->addrlen;
-	    int r;
-	    if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)&fwd->addr, slen)) < 0) {
-		udp_set_error(u, SIMPLE_CONNECTION_ERROR_SENDTO, "sendto()\n");
-	    }
+        if (!strcmp(fwd->label, label)) {
+            socklen_t slen = fwd->addrlen;
+            int r;
+            if ((r = sendto(u->s, buf, len, 0, (struct sockaddr*)&fwd->addr, slen)) < 0) {
+                udp_set_error(u, SIMPLE_CONNECTION_ERROR_SENDTO, "sendto()\n");
+            }
 
-	fwd->total += len;
+            fwd->total += len;
 
-	    return r;
-	}
-	fwd = fwd->next;
+            return r;
+        }
+        fwd = fwd->next;
     }
     return -1;
 }
@@ -380,7 +378,7 @@ void udp_forward_show(udp_channel *u)
 {
     udp_forward *fwd = u->forward;
     if (!fwd) {
- 	return;
+        return;
     }
     fprintf(stderr, "-- UDP forward table --\n");
     while (fwd) {
@@ -397,8 +395,8 @@ void udp_forward_show(udp_channel *u)
         } else {
             strcpy(addr_str, "unknown");
         }
-  	fprintf(stderr, "%s %s:%d %d\n", fwd->label, addr_str, port, fwd->total);
- 	fwd = fwd->next;
+        fprintf(stderr, "%s %s:%d %d\n", fwd->label, addr_str, port, fwd->total);
+        fwd = fwd->next;
     }
     fprintf(stderr, "-----------------------\n");
 }
@@ -408,27 +406,27 @@ void udp_forward_remove_inactive(udp_channel *u)
     udp_forward *fwd = u->forward;
     udp_forward *prev = NULL;
     if (!fwd) {
-	return;
+        return;
     }
     while (fwd) {
-	if (!fwd->used) {
-	    if (prev) {
-		prev->next = fwd->next;
-	    } else {
-		u->forward = fwd->next;
-	    }
-	    free(fwd->label);
-	    free(fwd);
-	    if (prev) {
-		fwd = prev->next;
-	    } else {
-		fwd = u->forward;
-	    }
-	    continue;
-	}
-	fwd->used = 0;
-	prev = fwd;
-	fwd = fwd->next;
+        if (!fwd->used) {
+            if (prev) {
+                prev->next = fwd->next;
+            } else {
+                u->forward = fwd->next;
+            }
+            free(fwd->label);
+            free(fwd);
+            if (prev) {
+                fwd = prev->next;
+            } else {
+                fwd = u->forward;
+            }
+            continue;
+        }
+        fwd->used = 0;
+        prev = fwd;
+        fwd = fwd->next;
     }
 }
 

@@ -41,8 +41,8 @@ THREAD_LOCAL simple_connection_error_info simple_connection_last_error = {
 
 /* Set error information */
 void simple_connection_set_error(int error_code, int system_errno,
-                                const char *function, int line,
-                                const char *format, ...)
+                                 const char *function, int line,
+                                 const char *format, ...)
 {
     simple_connection_last_error.error_code = error_code;
     simple_connection_last_error.system_errno = system_errno;
@@ -59,10 +59,10 @@ void simple_connection_set_error(int error_code, int system_errno,
 
 /* Set error with channel callback support */
 void simple_connection_set_channel_error(void *channel,
-                                        void (*error_callback)(const char *),
-                                        int error_code, int system_errno,
-                                        const char *function, int line,
-                                        const char *format, va_list args)
+                                         void (*error_callback)(const char *),
+                                         int error_code, int system_errno,
+                                         const char *function, int line,
+                                         const char *format, va_list args)
 {
     /* Set the global error information */
     char buffer[1024];
@@ -109,106 +109,106 @@ const char *simple_connection_get_last_error_message(void)
 const char *simple_connection_get_error_string(int error_code)
 {
     switch (error_code) {
-        case SIMPLE_CONNECTION_SUCCESS:
-            return "Success";
+    case SIMPLE_CONNECTION_SUCCESS:
+        return "Success";
 
         /* System errors */
-        case SIMPLE_CONNECTION_ERROR_SOCKET:
-            return "Socket creation failed";
-        case SIMPLE_CONNECTION_ERROR_BIND:
-            return "Socket bind failed";
-        case SIMPLE_CONNECTION_ERROR_LISTEN:
-            return "Socket listen failed";
-        case SIMPLE_CONNECTION_ERROR_CONNECT:
-            return "Socket connect failed";
-        case SIMPLE_CONNECTION_ERROR_ACCEPT:
-            return "Socket accept failed";
-        case SIMPLE_CONNECTION_ERROR_SEND:
-            return "Socket send failed";
-        case SIMPLE_CONNECTION_ERROR_RECV:
-            return "Socket receive failed";
-        case SIMPLE_CONNECTION_ERROR_SENDTO:
-            return "Socket sendto failed";
-        case SIMPLE_CONNECTION_ERROR_RECVFROM:
-            return "Socket recvfrom failed";
-        case SIMPLE_CONNECTION_ERROR_SETSOCKOPT:
-            return "Socket setsockopt failed";
-        case SIMPLE_CONNECTION_ERROR_GETADDRINFO:
-            return "getaddrinfo failed";
-        case SIMPLE_CONNECTION_ERROR_GETHOSTBYNAME:
-            return "gethostbyname failed";
-        case SIMPLE_CONNECTION_ERROR_INET_ATON:
-            return "inet_aton failed";
+    case SIMPLE_CONNECTION_ERROR_SOCKET:
+        return "Socket creation failed";
+    case SIMPLE_CONNECTION_ERROR_BIND:
+        return "Socket bind failed";
+    case SIMPLE_CONNECTION_ERROR_LISTEN:
+        return "Socket listen failed";
+    case SIMPLE_CONNECTION_ERROR_CONNECT:
+        return "Socket connect failed";
+    case SIMPLE_CONNECTION_ERROR_ACCEPT:
+        return "Socket accept failed";
+    case SIMPLE_CONNECTION_ERROR_SEND:
+        return "Socket send failed";
+    case SIMPLE_CONNECTION_ERROR_RECV:
+        return "Socket receive failed";
+    case SIMPLE_CONNECTION_ERROR_SENDTO:
+        return "Socket sendto failed";
+    case SIMPLE_CONNECTION_ERROR_RECVFROM:
+        return "Socket recvfrom failed";
+    case SIMPLE_CONNECTION_ERROR_SETSOCKOPT:
+        return "Socket setsockopt failed";
+    case SIMPLE_CONNECTION_ERROR_GETADDRINFO:
+        return "getaddrinfo failed";
+    case SIMPLE_CONNECTION_ERROR_GETHOSTBYNAME:
+        return "gethostbyname failed";
+    case SIMPLE_CONNECTION_ERROR_INET_ATON:
+        return "inet_aton failed";
 
         /* SSL/TLS errors */
-        case SIMPLE_CONNECTION_ERROR_SSL_CTX_NEW:
-            return "SSL context creation failed";
-        case SIMPLE_CONNECTION_ERROR_SSL_CIPHER_LIST:
-            return "SSL cipher list setting failed";
-        case SIMPLE_CONNECTION_ERROR_SSL_PRIVATE_KEY:
-            return "SSL private key loading failed";
-        case SIMPLE_CONNECTION_ERROR_SSL_CERTIFICATE:
-            return "SSL certificate loading failed";
-        case SIMPLE_CONNECTION_ERROR_SSL_NEW:
-            return "SSL object creation failed";
-        case SIMPLE_CONNECTION_ERROR_SSL_CONNECT:
-            return "SSL connect failed";
-        case SIMPLE_CONNECTION_ERROR_SSL_ACCEPT:
-            return "SSL accept failed";
-        case SIMPLE_CONNECTION_ERROR_SSL_READ:
-            return "SSL read failed";
-        case SIMPLE_CONNECTION_ERROR_SSL_WRITE:
-            return "SSL write failed";
-        case SIMPLE_CONNECTION_ERROR_SSL_SET_FD:
-            return "SSL set file descriptor failed";
+    case SIMPLE_CONNECTION_ERROR_SSL_CTX_NEW:
+        return "SSL context creation failed";
+    case SIMPLE_CONNECTION_ERROR_SSL_CIPHER_LIST:
+        return "SSL cipher list setting failed";
+    case SIMPLE_CONNECTION_ERROR_SSL_PRIVATE_KEY:
+        return "SSL private key loading failed";
+    case SIMPLE_CONNECTION_ERROR_SSL_CERTIFICATE:
+        return "SSL certificate loading failed";
+    case SIMPLE_CONNECTION_ERROR_SSL_NEW:
+        return "SSL object creation failed";
+    case SIMPLE_CONNECTION_ERROR_SSL_CONNECT:
+        return "SSL connect failed";
+    case SIMPLE_CONNECTION_ERROR_SSL_ACCEPT:
+        return "SSL accept failed";
+    case SIMPLE_CONNECTION_ERROR_SSL_READ:
+        return "SSL read failed";
+    case SIMPLE_CONNECTION_ERROR_SSL_WRITE:
+        return "SSL write failed";
+    case SIMPLE_CONNECTION_ERROR_SSL_SET_FD:
+        return "SSL set file descriptor failed";
 
         /* WebSocket errors */
-        case SIMPLE_CONNECTION_ERROR_WS_HANDSHAKE:
-            return "WebSocket handshake failed";
-        case SIMPLE_CONNECTION_ERROR_WS_INVALID_OPCODE:
-            return "WebSocket invalid opcode";
-        case SIMPLE_CONNECTION_ERROR_WS_PAYLOAD_TOO_LARGE:
-            return "WebSocket payload too large";
-        case SIMPLE_CONNECTION_ERROR_WS_CONNECTION_CLOSED:
-            return "WebSocket connection closed";
-        case SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR:
-            return "WebSocket protocol error";
+    case SIMPLE_CONNECTION_ERROR_WS_HANDSHAKE:
+        return "WebSocket handshake failed";
+    case SIMPLE_CONNECTION_ERROR_WS_INVALID_OPCODE:
+        return "WebSocket invalid opcode";
+    case SIMPLE_CONNECTION_ERROR_WS_PAYLOAD_TOO_LARGE:
+        return "WebSocket payload too large";
+    case SIMPLE_CONNECTION_ERROR_WS_CONNECTION_CLOSED:
+        return "WebSocket connection closed";
+    case SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR:
+        return "WebSocket protocol error";
 
         /* Memory errors */
-        case SIMPLE_CONNECTION_ERROR_MALLOC:
-            return "Memory allocation failed";
-        case SIMPLE_CONNECTION_ERROR_STRDUP:
-            return "String duplication failed";
+    case SIMPLE_CONNECTION_ERROR_MALLOC:
+        return "Memory allocation failed";
+    case SIMPLE_CONNECTION_ERROR_STRDUP:
+        return "String duplication failed";
 
         /* Input validation errors */
-        case SIMPLE_CONNECTION_ERROR_INVALID_PORT:
-            return "Invalid port number";
-        case SIMPLE_CONNECTION_ERROR_INVALID_ADDRESS:
-            return "Invalid address";
-        case SIMPLE_CONNECTION_ERROR_INVALID_MODE:
-            return "Invalid connection mode";
-        case SIMPLE_CONNECTION_ERROR_INVALID_SSL_KEY:
-            return "Invalid SSL key file";
-        case SIMPLE_CONNECTION_ERROR_INVALID_SSL_CERT:
-            return "Invalid SSL certificate file";
-        case SIMPLE_CONNECTION_ERROR_INVALID_PATH:
-            return "Invalid path";
+    case SIMPLE_CONNECTION_ERROR_INVALID_PORT:
+        return "Invalid port number";
+    case SIMPLE_CONNECTION_ERROR_INVALID_ADDRESS:
+        return "Invalid address";
+    case SIMPLE_CONNECTION_ERROR_INVALID_MODE:
+        return "Invalid connection mode";
+    case SIMPLE_CONNECTION_ERROR_INVALID_SSL_KEY:
+        return "Invalid SSL key file";
+    case SIMPLE_CONNECTION_ERROR_INVALID_SSL_CERT:
+        return "Invalid SSL certificate file";
+    case SIMPLE_CONNECTION_ERROR_INVALID_PATH:
+        return "Invalid path";
 
         /* Connection state errors */
-        case SIMPLE_CONNECTION_ERROR_NOT_CONNECTED:
-            return "Not connected";
-        case SIMPLE_CONNECTION_ERROR_ALREADY_CONNECTED:
-            return "Already connected";
-        case SIMPLE_CONNECTION_ERROR_CONNECTION_CLOSED:
-            return "Connection closed";
-        case SIMPLE_CONNECTION_ERROR_TIMEOUT:
-            return "Operation timed out";
+    case SIMPLE_CONNECTION_ERROR_NOT_CONNECTED:
+        return "Not connected";
+    case SIMPLE_CONNECTION_ERROR_ALREADY_CONNECTED:
+        return "Already connected";
+    case SIMPLE_CONNECTION_ERROR_CONNECTION_CLOSED:
+        return "Connection closed";
+    case SIMPLE_CONNECTION_ERROR_TIMEOUT:
+        return "Operation timed out";
 
         /* Winsock errors */
-        case SIMPLE_CONNECTION_ERROR_WINSOCK_INIT:
-            return "Winsock initialization failed";
+    case SIMPLE_CONNECTION_ERROR_WINSOCK_INIT:
+        return "Winsock initialization failed";
 
-        default:
-            return "Unknown error";
+    default:
+        return "Unknown error";
     }
 }

@@ -43,8 +43,8 @@ int simple_connection_close_socket(int sockfd);
 
 /* Address resolution utilities */
 int simple_connection_resolve_address(const char *hostname, const char *service,
-                                    int family, int socktype, int protocol, int flags,
-                                    struct addrinfo **result);
+                                      int family, int socktype, int protocol, int flags,
+                                      struct addrinfo **result);
 void simple_connection_free_address(struct addrinfo *addr);
 
 /* Socket option utilities */

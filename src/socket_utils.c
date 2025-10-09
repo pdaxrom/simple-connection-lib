@@ -63,8 +63,8 @@ int simple_connection_close_socket(int sockfd)
 
 /* Resolve an address */
 int simple_connection_resolve_address(const char *hostname, const char *service,
-                                    int family, int socktype, int protocol, int flags,
-                                    struct addrinfo **result)
+                                      int family, int socktype, int protocol, int flags,
+                                      struct addrinfo **result)
 {
     struct addrinfo hints;
 

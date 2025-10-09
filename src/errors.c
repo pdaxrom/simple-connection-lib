@@ -57,6 +57,26 @@ void simple_connection_set_error(int error_code, int system_errno,
     va_end(args);
 }
 
+/* Set error with channel callback support */
+void simple_connection_set_channel_error(void *channel,
+                                        void (*error_callback)(const char *),
+                                        int error_code, int system_errno,
+                                        const char *function, int line,
+                                        const char *format, va_list args)
+{
+    /* Set the global error information */
+    char buffer[1024];
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    simple_connection_set_error(error_code, system_errno, function, line, "%s", buffer);
+
+    /* Also call the error callback for backward compatibility */
+    if (channel && error_callback) {
+        error_callback(buffer);
+    } else {
+        vfprintf(stderr, format, args);
+    }
+}
+
 /* Clear error information */
 void simple_connection_clear_error(void)
 {

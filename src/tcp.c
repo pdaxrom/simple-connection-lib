@@ -34,25 +34,17 @@
 #include "getrandom.h"
 #include "base64.h"
 #include "errors.h"
+#include "socket_utils.h"
 
 
 
 static void tcp_set_error(tcp_channel *u, int error_code, const char *format, ...)
 {
+    void (*callback)(const char *) = u ? u->error_callback : NULL;
     va_list args;
     va_start(args, format);
-
-    /* Set the global error information */
-    char buffer[1024];
-    vsnprintf(buffer, sizeof(buffer), format, args);
-    simple_connection_set_error(error_code, errno, __func__, __LINE__, "%s", buffer);
-
-    /* Also call the error callback for backward compatibility */
-    if (u && u->error_callback) {
-        u->error_callback(buffer);
-    } else {
-        vfprintf(stderr, format, args);
-    }
+    simple_connection_set_channel_error(u, callback, error_code, errno,
+                                      __func__, __LINE__, format, args);
     va_end(args);
 }
 
@@ -216,23 +208,18 @@ static tcp_channel *tcp_open_server(int mode, uint16_t port, char *sslkeyfile, c
     u->primary_mode = mode;
 
 #ifdef HAVE_IPV6
-    struct addrinfo hints, *res;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET6;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
-    hints.ai_flags = AI_PASSIVE;
+    struct addrinfo *res;
     char port_str[6];
     snprintf(port_str, sizeof(port_str), "%d", port);
-    if (getaddrinfo(NULL, port_str, &hints, &res) != 0) {
+    if (simple_connection_resolve_address(NULL, port_str, AF_INET6, SOCK_STREAM, IPPROTO_TCP, AI_PASSIVE, &res) != 0) {
         tcp_set_error(u, SIMPLE_CONNECTION_ERROR_GETADDRINFO, "getaddrinfo() failed\n");
         free(u);
         return NULL;
     }
 
-    if ((u->s = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
+    if ((u->s = simple_connection_create_socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
         tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SOCKET, "socket() error!\n");
-        freeaddrinfo(res);
+        simple_connection_free_address(res);
         free(u);
         return NULL;
     }
@@ -240,9 +227,9 @@ static tcp_channel *tcp_open_server(int mode, uint16_t port, char *sslkeyfile, c
     memcpy(&u->my_addr, res->ai_addr, res->ai_addrlen);
     u->addrlen = res->ai_addrlen;
 
-    freeaddrinfo(res);
+    simple_connection_free_address(res);
 #else
-    if ((u->s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
+    if ((u->s = simple_connection_create_socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
         tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SOCKET, "socket() error!\n");
         free(u);
         return NULL;
@@ -264,16 +251,15 @@ static tcp_channel *tcp_open_server(int mode, uint16_t port, char *sslkeyfile, c
         return NULL;
     }
 
-    if(bind(u->s, (struct sockaddr *)&u->my_addr, u->addrlen) == -1) {
+    if(simple_connection_bind_socket(u->s, (struct sockaddr *)&u->my_addr, u->addrlen) == -1) {
         tcp_set_error(u, SIMPLE_CONNECTION_ERROR_BIND, "bind() error!\n");
-        closesocket(u->s);
+        simple_connection_close_socket(u->s);
         free(u);
         return NULL;
     }
-
-    if (listen(u->s, 10) == -1) {
+    if (simple_connection_listen_socket(u->s, 10) == -1) {
         tcp_set_error(u, SIMPLE_CONNECTION_ERROR_LISTEN, "listen() error!\n");
-        closesocket(u->s);
+        simple_connection_close_socket(u->s);
         free(u);
         return NULL;
     }
@@ -306,20 +292,16 @@ static tcp_channel *tcp_open_client(int mode, const char *addr, uint16_t port)
     u->primary_mode = mode;
 
 #ifdef HAVE_IPV6
-    struct addrinfo hints, *res;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_protocol = IPPROTO_TCP;
-    if (getaddrinfo(addr, NULL, &hints, &res) != 0) {
+    struct addrinfo *res;
+    if (simple_connection_resolve_address(addr, NULL, AF_UNSPEC, SOCK_STREAM, IPPROTO_TCP, 0, &res) != 0) {
         tcp_set_error(u, SIMPLE_CONNECTION_ERROR_GETADDRINFO, "getaddrinfo() failed\n");
         free(u);
         return NULL;
     }
 
-    if ((u->s = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
+    if ((u->s = simple_connection_create_socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
         tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SOCKET, "socket() error!\n");
-        freeaddrinfo(res);
+        simple_connection_free_address(res);
         free(u);
         return NULL;
     }
@@ -332,7 +314,7 @@ static tcp_channel *tcp_open_client(int mode, const char *addr, uint16_t port)
     } else if (sa->sa_family == AF_INET6) {
         ((struct sockaddr_in6 *)sa)->sin6_port = htons(port);
     }
-    freeaddrinfo(res);
+    simple_connection_free_address(res);
 #else
     if ((u->s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) == -1) {
         tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SOCKET, "socket() error!\n");
@@ -451,7 +433,7 @@ int tcp_close(tcp_channel *u)
     if (u->s != -1) {
 	if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
 	    char buf[] = { 0, 0, 'C', 'l', 'o', 's', 'e', 'd' };
-	    *((unsigned short *)buf) = htons(1000);
+	    *((unsigned short *)buf) = htons(1000); // WebSocket close code: 1000 (normal closure)
 	    tcp_write_ws(u, WS_OPCODE_CLOSE, buf, sizeof(buf));
 	}
 
@@ -596,6 +578,7 @@ static int get_http_header(tcp_channel *channel, char *head, int headLen)
 
 	totalRead += nread;
 
+	// Check for HTTP header end: \r\n\r\n (CRLF CRLF)
 	if (crlf[0] == 13 && crlf[1] == 10 && crlf[2] == 13 && crlf[3] == 10) {
 	    break;
 	    }
@@ -664,10 +647,10 @@ static char *header_get_path(tcp_channel *channel, char *header, char *str, int 
 }
 
 #define WS_HANDSHAKE_UUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-#define HTTP_HEADER_MAX_SIZE 1024
+#define HTTP_HEADER_MAX_SIZE 8192
 #define HTTP_FIELD_MAX_SIZE 256
 #define WS_KEY_LEN 16
-#define WS_CLOSE_REASON_MAX_LEN 123
+
 
 static int http_ws_method_server(tcp_channel *channel, char *request, size_t len)
 {
@@ -830,17 +813,17 @@ static int send_ws_header(tcp_channel *channel, uint8_t opcode, int len)
     ws_t *ws = channel->ws;
 
     ws->header.b0 = 0x80 | (opcode & 0x0f);
-    if (blen <= 125) {
+    // WebSocket payload length encoding (RFC 6455)
+    if (blen <= 125) {  // Length fits in 7 bits
 	ws->header.b1 = (uint8_t)blen;
 	mask = ws->header.u.m.c;
 	sz = 2;
-    } else if (blen <= 65535) {
+    } else if (blen <= 65535) {  // Length fits in 16 bits
 	ws->header.b1 = 0x7e;
 	ws->header.u.s16.l16 = WS_HTON16((uint16_t)blen);
 	mask = ws->header.u.s16.m16.c;
 	sz = 4;
-    } else {
-	ws->header.b1 = 0x7f;
+    } else {  // Length needs 64 bits
 	ws->header.u.s64.l64 = WS_HTON64(blen);
 	mask = ws->header.u.s64.m64.c;
 	sz = 10;

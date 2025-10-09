@@ -9,6 +9,8 @@
 #ifndef BASE64_H
 #define BASE64_H
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif

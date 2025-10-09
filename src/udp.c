@@ -32,25 +32,17 @@
 #include "platform.h"
 #include "udp.h"
 #include "errors.h"
+#include "socket_utils.h"
 
 
 
 static void udp_set_error(udp_channel *u, int error_code, const char *format, ...)
 {
+    void (*callback)(const char *) = u ? u->error_callback : NULL;
     va_list args;
     va_start(args, format);
-
-    /* Set the global error information */
-    char buffer[1024];
-    vsnprintf(buffer, sizeof(buffer), format, args);
-    simple_connection_set_error(error_code, errno, __func__, __LINE__, "%s", buffer);
-
-    /* Also call the error callback for backward compatibility */
-    if (u && u->error_callback) {
-        u->error_callback(buffer);
-    } else {
-        vfprintf(stderr, format, args);
-    }
+    simple_connection_set_channel_error(u, callback, error_code, errno,
+                                      __func__, __LINE__, format, args);
     va_end(args);
 }
 
@@ -70,23 +62,18 @@ static udp_channel *udp_open_server(uint16_t port)
     u->mode = UDP_SERVER;
 
 #ifdef HAVE_IPV6
-    struct addrinfo hints, *res;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET6;
-    hints.ai_socktype = SOCK_DGRAM;
-    hints.ai_protocol = IPPROTO_UDP;
-    hints.ai_flags = AI_PASSIVE;
+    struct addrinfo *res;
     char port_str[6];
     snprintf(port_str, sizeof(port_str), "%d", port);
-    if (getaddrinfo(NULL, port_str, &hints, &res) != 0) {
+    if (simple_connection_resolve_address(NULL, port_str, AF_INET6, SOCK_DGRAM, IPPROTO_UDP, AI_PASSIVE, &res) != 0) {
         udp_set_error(u, SIMPLE_CONNECTION_ERROR_GETADDRINFO, "getaddrinfo() failed\n");
         free(u);
         return NULL;
     }
 
-    if ((u->s = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
+    if ((u->s = simple_connection_create_socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
         udp_set_error(u, SIMPLE_CONNECTION_ERROR_SOCKET, "socket() failed\n");
-        freeaddrinfo(res);
+        simple_connection_free_address(res);
         free(u);
         return NULL;
     }
@@ -94,7 +81,7 @@ static udp_channel *udp_open_server(uint16_t port)
     memcpy(&u->my_addr, res->ai_addr, res->ai_addrlen);
     u->my_addrlen = res->ai_addrlen;
 
-    freeaddrinfo(res);
+    simple_connection_free_address(res);
 #else
     if ((u->s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
         free(u);
@@ -109,7 +96,7 @@ static udp_channel *udp_open_server(uint16_t port)
     u->my_addrlen = sizeof(*sin);
 #endif
 
-    if (bind(u->s, (struct sockaddr* ) &u->my_addr, u->my_addrlen) == -1) {
+    if (simple_connection_bind_socket(u->s, (struct sockaddr* ) &u->my_addr, u->my_addrlen) == -1) {
         udp_set_error(u, SIMPLE_CONNECTION_ERROR_BIND, "bind() failed\n");
         closesocket(u->s);
         free(u);
@@ -152,22 +139,18 @@ static udp_channel *udp_open_client(char *addr, uint16_t port)
     u->mode = UDP_CLIENT;
 
 #ifdef HAVE_IPV6
-    struct addrinfo hints, *res;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;  // Allow both IPv4 and IPv6
-    hints.ai_socktype = SOCK_DGRAM;
-    hints.ai_protocol = IPPROTO_UDP;
+    struct addrinfo *res;
     char port_str[6];
     snprintf(port_str, sizeof(port_str), "%d", port);
-    if (getaddrinfo(addr, port_str, &hints, &res) != 0) {
+    if (simple_connection_resolve_address(addr, port_str, AF_UNSPEC, SOCK_DGRAM, IPPROTO_UDP, 0, &res) != 0) {
         udp_set_error(u, SIMPLE_CONNECTION_ERROR_GETADDRINFO, "getaddrinfo() failed\n");
         free(u);
         return NULL;
     }
 
-    if ((u->s = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
+    if ((u->s = simple_connection_create_socket(res->ai_family, res->ai_socktype, res->ai_protocol)) == -1) {
         udp_set_error(u, SIMPLE_CONNECTION_ERROR_SOCKET, "socket() failed\n");
-        freeaddrinfo(res);
+        simple_connection_free_address(res);
         free(u);
         return NULL;
     }
@@ -175,7 +158,7 @@ static udp_channel *udp_open_client(char *addr, uint16_t port)
     memcpy(&u->my_addr, res->ai_addr, res->ai_addrlen);
     u->my_addrlen = res->ai_addrlen;
 
-    freeaddrinfo(res);
+    simple_connection_free_address(res);
 #else
     if ((u->s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
         free(u);

@@ -33,6 +33,7 @@
 #endif
 
 #include <errno.h>
+#include <stdarg.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -120,6 +121,11 @@ const char *simple_connection_get_error_string(int error_code);
 void simple_connection_set_error(int error_code, int system_errno,
                                 const char *function, int line,
                                 const char *format, ...);
+void simple_connection_set_channel_error(void *channel,
+                                        void (*error_callback)(const char *),
+                                        int error_code, int system_errno,
+                                        const char *function, int line,
+                                        const char *format, va_list args);
 void simple_connection_clear_error(void);
 
 #ifdef __cplusplus

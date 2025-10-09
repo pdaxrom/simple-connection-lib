@@ -25,6 +25,8 @@
 #ifndef __GETRANDOM_H__
 #define __GETRANDOM_H__
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif

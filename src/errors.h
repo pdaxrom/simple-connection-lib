@@ -103,9 +103,6 @@ enum {
 typedef struct {
     int error_code;         /* SIMPLE_CONNECTION_* error code */
     int system_errno;       /* errno value from system call */
-    const char *function;   /* Function where error occurred */
-    int line;               /* Line number where error occurred */
-    char message[256];      /* Human-readable error message */
 } simple_connection_error_info;
 
 /* Global error info - thread local for thread safety */
@@ -118,14 +115,10 @@ const char *simple_connection_get_last_error_message(void);
 const char *simple_connection_get_error_string(int error_code);
 
 /* Internal functions for setting errors */
-void simple_connection_set_error(int error_code, int system_errno,
-                                 const char *function, int line,
-                                 const char *format, ...);
+void simple_connection_set_error(int error_code, int system_errno);
 void simple_connection_set_channel_error(void *channel,
                                          void (*error_callback)(const char *),
-                                         int error_code, int system_errno,
-                                         const char *function, int line,
-                                         const char *format, va_list args);
+                                         int error_code, int system_errno);
 void simple_connection_clear_error(void);
 
 #ifdef __cplusplus

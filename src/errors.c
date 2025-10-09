@@ -33,47 +33,31 @@
 /* Global error info - thread local for thread safety */
 THREAD_LOCAL simple_connection_error_info simple_connection_last_error = {
     .error_code = SIMPLE_CONNECTION_SUCCESS,
-    .system_errno = 0,
-    .function = NULL,
-    .line = 0,
-    .message = {0}
+    .system_errno = 0
 };
 
 /* Set error information */
-void simple_connection_set_error(int error_code, int system_errno,
-                                 const char *function, int line,
-                                 const char *format, ...)
+void simple_connection_set_error(int error_code, int system_errno)
 {
     simple_connection_last_error.error_code = error_code;
     simple_connection_last_error.system_errno = system_errno;
-    simple_connection_last_error.function = function;
-    simple_connection_last_error.line = line;
-
-    va_list args;
-    va_start(args, format);
-    vsnprintf(simple_connection_last_error.message,
-              sizeof(simple_connection_last_error.message),
-              format, args);
-    va_end(args);
 }
 
 /* Set error with channel callback support */
 void simple_connection_set_channel_error(void *channel,
                                          void (*error_callback)(const char *),
-                                         int error_code, int system_errno,
-                                         const char *function, int line,
-                                         const char *format, va_list args)
+                                         int error_code, int system_errno)
 {
     /* Set the global error information */
     char buffer[1024];
-    vsnprintf(buffer, sizeof(buffer), format, args);
-    simple_connection_set_error(error_code, system_errno, function, line, "%s", buffer);
+    snprintf(buffer, sizeof(buffer), "%s", simple_connection_get_error_string(error_code));
+    simple_connection_set_error(error_code, system_errno);
 
     /* Also call the error callback for backward compatibility */
     if (channel && error_callback) {
         error_callback(buffer);
     } else {
-        vfprintf(stderr, format, args);
+        fprintf(stderr, "%s\n", buffer);
     }
 }
 
@@ -82,9 +66,6 @@ void simple_connection_clear_error(void)
 {
     simple_connection_last_error.error_code = SIMPLE_CONNECTION_SUCCESS;
     simple_connection_last_error.system_errno = 0;
-    simple_connection_last_error.function = NULL;
-    simple_connection_last_error.line = 0;
-    simple_connection_last_error.message[0] = '\0';
 }
 
 /* Get last error code */
@@ -102,7 +83,7 @@ int simple_connection_get_last_errno(void)
 /* Get last error message */
 const char *simple_connection_get_last_error_message(void)
 {
-    return simple_connection_last_error.message;
+    return simple_connection_get_error_string(simple_connection_last_error.error_code);
 }
 
 /* Convert error code to string */

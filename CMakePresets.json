@@ -1,0 +1,85 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "default",
+      "displayName": "Default Config",
+      "description": "Default build configuration with all features enabled",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build"
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "description": "Debug build with all features",
+      "inherits": "default",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release",
+      "description": "Release build with all features",
+      "inherits": "default",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "no-ssl",
+      "displayName": "No SSL",
+      "description": "Build without SSL/TLS support",
+      "inherits": "default",
+      "cacheVariables": {
+        "ENABLE_SSL": "OFF"
+      }
+    },
+    {
+      "name": "no-ipv6",
+      "displayName": "No IPv6",
+      "description": "Build without IPv6 support",
+      "inherits": "default",
+      "cacheVariables": {
+        "ENABLE_IPV6": "OFF"
+      }
+    },
+    {
+      "name": "minimal",
+      "displayName": "Minimal",
+      "description": "Minimal build without SSL, IPv6, or tests",
+      "inherits": "default",
+      "cacheVariables": {
+        "ENABLE_SSL": "OFF",
+        "ENABLE_IPV6": "OFF",
+        "BUILD_TESTS": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "default",
+      "configurePreset": "default"
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "release",
+      "configurePreset": "release"
+    },
+    {
+      "name": "no-ssl",
+      "configurePreset": "no-ssl"
+    },
+    {
+      "name": "no-ipv6",
+      "configurePreset": "no-ipv6"
+    },
+    {
+      "name": "minimal",
+      "configurePreset": "minimal"
+    }
+  ]
+}

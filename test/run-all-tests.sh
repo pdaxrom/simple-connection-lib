@@ -97,6 +97,12 @@ run_test "UDP IPv4" "${TEST_PREFIX}udpserver" "${TEST_PREFIX}udpclient" "Hello c
 # Test 4: UDP IPv6
 run_test "UDP IPv6" "${TEST_PREFIX}udpserver-ipv6" "${TEST_PREFIX}udpclient-ipv6" "Hello UDP IPv6 client"
 
+# Generate SSL certificate if needed
+if [ ! -f "cert/server.pem" ]; then
+    echo "Generating SSL certificate..."
+    cd cert && ./gencert.sh && cd ..
+fi
+
 # Test 5: TCP SSL
 run_test "TCP SSL" "${TEST_PREFIX}tcpsslserver" "${TEST_PREFIX}tcpsslclient" "Hello client"
 

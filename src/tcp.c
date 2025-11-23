@@ -959,124 +959,81 @@ static int recv_ws_header(tcp_channel *channel)
         }
     }
 
-    if (ws->header.b0 == (0x80 | WS_OPCODE_CLOSE)) {
-        char buf[ws->header.b1 + 1];
-        buf[ws->header.b1] = 0;
-        if (tcp_read_internal(channel, buf, ws->header.b1) != ws->header.b1) {
-            tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV);
+    if (ws->header.b0 == (0x80 | WS_OPCODE_CLOSE) ||
+        ws->header.b0 == (0x80 | WS_OPCODE_PING) ||
+        ws->header.b0 == (0x80 | WS_OPCODE_PONG)) {
+        int control_len = ws->header.b1 & 0x7f;
+        if (control_len == 0x7e) {
+            if (tcp_read_internal(channel, (char *)&ws->header.u.s16.l16, 2) != 2) {
+                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV);
+                return 0;
+            }
+            control_len = WS_NTOH16(ws->header.u.s16.l16);
+        } else if (control_len == 0x7f) {
+            if (tcp_read_internal(channel, (char *)&ws->header.u.s64.l64, 8) != 8) {
+                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV);
+                return 0;
+            }
+            uint64_t tmp_len = WS_NTOH64(ws->header.u.s64.l64);
+            if (tmp_len > UINT32_MAX) {
+                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR);
+                return 0;
+            }
+            control_len = (int)tmp_len;
+        }
+        if (control_len > 125) {
+            tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR);
             return 0;
         }
-
-        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_CONNECTION_CLOSED);
-
-        return 0;
-    }
-
-    if (ws->header.b0 == (0x80 | WS_OPCODE_PING)) {
-        char *buf = NULL;
-        int ping_len = 0;
-        if ((ws->header.b1 & 0x7f) == 0x7e) {
-            if (tcp_read_internal(channel, (char *)&ws->header.u.s16.l16, 2) != 2) {
-                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV);
-                return 0;
-            }
-            ping_len = WS_NTOH16(ws->header.u.s16.l16);
-        } else if ((ws->header.b1 & 0x7f) == 0x7f) {
-            if (tcp_read_internal(channel, (char *)&ws->header.u.s64.l64, 8) != 8) {
-                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV);
-                return 0;
-            }
-            ping_len = WS_NTOH64(ws->header.u.s64.l64);
-        } else {
-            ping_len = ws->header.b1 & 0x7f;
-        }
         if (ws->header.b1 & 0x80) {
-            if ((ws->header.b1 & 0x7f) == 0x7e) {
-                if (tcp_read_internal(channel, (char *)ws->header.u.s16.m16.c, 4) != 4) {
-                    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV);
-                    return 0;
-                }
-            } else if ((ws->header.b1 & 0x7f) == 0x7f) {
-                if (tcp_read_internal(channel, (char *)ws->header.u.s64.m64.c, 4) != 4) {
-                    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV);
-                    return 0;
-                }
-            } else {
-                if (tcp_read_internal(channel, (char *)ws->header.u.m.c, 4) != 4) {
-                    tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV);
-                    return 0;
-                }
+            unsigned char *mask_ptr;
+            switch (ws->header.b1 & 0x7f) {
+            case 0x7e: mask_ptr = ws->header.u.s16.m16.c; break;
+            case 0x7f: mask_ptr = ws->header.u.s64.m64.c; break;
+            default: mask_ptr = ws->header.u.m.c; break;
             }
-        }
-        if (ping_len > 0) {
-            buf = malloc(ping_len);
-            if (!buf) {
-                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_MALLOC);
-                return 0;
-            }
-            if (tcp_read_internal(channel, buf, ping_len) != ping_len) {
-                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV);
-                free(buf);
-                return 0;
-            }
-            ws_mask_data(ws, buf, ping_len);
-        }
-        if (!tcp_write_ws(channel, WS_OPCODE_PONG, buf, ping_len)) {
-            tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SEND);
-        }
-        if (buf) free(buf);
-        return -1;
-    }
-
-    if (ws->header.b0 == (0x80 | WS_OPCODE_PONG)) {
-        int pong_len = 0;
-        if ((ws->header.b1 & 0x7f) == 0x7e) {
-            if (tcp_read_internal(channel, (char *)&ws->header.u.s16.l16, 2) != 2) {
+            if (tcp_read_internal(channel, (char *)mask_ptr, 4) != 4) {
                 tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV);
                 return 0;
             }
-            pong_len = WS_NTOH16(ws->header.u.s16.l16);
-        } else if ((ws->header.b1 & 0x7f) == 0x7f) {
-            if (tcp_read_internal(channel, (char *)&ws->header.u.s64.l64, 8) != 8) {
-                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV);
-                return 0;
-            }
-            pong_len = WS_NTOH64(ws->header.u.s64.l64);
-        } else {
-            pong_len = ws->header.b1 & 0x7f;
         }
-        if (ws->header.b1 & 0x80) {
-            if ((ws->header.b1 & 0x7f) == 0x7e) {
-                if (tcp_read_internal(channel, (char *)ws->header.u.s16.m16.c, 4) != 4) {
+        ws->pos = 0;
+        if (ws->header.b0 == (0x80 | WS_OPCODE_CLOSE)) {
+            unsigned char payload[125];
+            if (control_len > 0) {
+                if (tcp_read_internal(channel, (char *)payload, control_len) != control_len) {
                     tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV);
                     return 0;
                 }
-            } else if ((ws->header.b1 & 0x7f) == 0x7f) {
-                if (tcp_read_internal(channel, (char *)ws->header.u.s64.m64.c, 4) != 4) {
+                ws_mask_data(ws, (char *)payload, control_len);
+            }
+            tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_CONNECTION_CLOSED);
+            return 0;
+        } else if (ws->header.b0 == (0x80 | WS_OPCODE_PING)) {
+            unsigned char payload[125];
+            if (control_len > 0) {
+                if (tcp_read_internal(channel, (char *)payload, control_len) != control_len) {
                     tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV);
                     return 0;
                 }
-            } else {
-                if (tcp_read_internal(channel, (char *)ws->header.u.m.c, 4) != 4) {
+                ws_mask_data(ws, (char *)payload, control_len);
+            }
+            if (!tcp_write_ws(channel, WS_OPCODE_PONG, control_len ? (char *)payload : NULL, control_len)) {
+                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SEND);
+                return 0;
+            }
+            return -1;
+        } else { // pong
+            unsigned char discard[125];
+            if (control_len > 0) {
+                if (tcp_read_internal(channel, (char *)discard, control_len) != control_len) {
                     tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV);
                     return 0;
                 }
+                ws_mask_data(ws, (char *)discard, control_len);
             }
+            return -1;
         }
-        if (pong_len > 0) {
-            char *discard = malloc(pong_len);
-            if (!discard) {
-                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_MALLOC);
-                return 0;
-            }
-            if (tcp_read_internal(channel, discard, pong_len) != pong_len) {
-                tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_RECV);
-                free(discard);
-                return 0;
-            }
-            free(discard);
-        }
-        return -1;
     }
 
     if ((ws->header.b1 & 0x7f) == 0x7e) {
@@ -1119,34 +1076,37 @@ static int recv_ws_header(tcp_channel *channel)
 
 static int tcp_write_ws(tcp_channel *u, uint8_t opcode, char *buf, size_t len)
 {
+    char *payload = buf;
     char *tmp = NULL;
-    if (len > 0) {
-        tmp = malloc(len);
-        if (!tmp) {
-            tcp_set_error(u, SIMPLE_CONNECTION_ERROR_MALLOC);
-            return 0;
-        }
+
+    if (len > 0 && !buf) {
+        tcp_set_error(u, SIMPLE_CONNECTION_ERROR_INVALID_MODE);
+        return 0;
     }
 
     if (!send_ws_header(u, opcode, len)) {
-        if (tmp) free(tmp);
         return 0;
     }
     ws_t *ws = u->ws;
     ws->pos = 0;
 
-    if (buf && len > 0) {
-        memcpy(tmp, buf, len);
-    }
+    if (len > 0) {
+        if (u->primary_mode == TCP_CLIENT || u->primary_mode == TCP_SSL_CLIENT) {
+            tmp = malloc(len);
+            if (!tmp) {
+                tcp_set_error(u, SIMPLE_CONNECTION_ERROR_MALLOC);
+                return 0;
+            }
+            memcpy(tmp, buf, len);
+            payload = tmp;
+            ws_mask_data(u->ws, payload, len);
+        }
 
-    if (len > 0 && (u->primary_mode == TCP_CLIENT || u->primary_mode == TCP_SSL_CLIENT)) {
-        ws_mask_data(u->ws, tmp, len);
-    }
-
-    if (tcp_write_internal(u, tmp ? tmp : "", len) != len) {
-        tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SEND);
-        if (tmp) free(tmp);
-        return 0;
+        if (tcp_write_internal(u, payload, len) != len) {
+            tcp_set_error(u, SIMPLE_CONNECTION_ERROR_SEND);
+            if (tmp) free(tmp);
+            return 0;
+        }
     }
 
     if (tmp) free(tmp);
@@ -1157,7 +1117,7 @@ static int tcp_write_ws(tcp_channel *u, uint8_t opcode, char *buf, size_t len)
 int tcp_write(tcp_channel *u, void *buf, size_t len)
 {
     if (u->connection_method == SIMPLE_CONNECTION_METHOD_WS) {
-        return tcp_write_ws(u, WS_OPCODE_BINARY_FRAME, buf, len);
+        return tcp_write_ws(u, WS_OPCODE_BINARY_FRAME, buf, len) ? (int)len : 0;
     }
 
     if (tcp_write_internal(u, buf, len) != len) {

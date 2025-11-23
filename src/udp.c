@@ -72,12 +72,29 @@ static udp_channel *udp_open_server(uint16_t port)
         return NULL;
     }
 
+    int reuse = 1;
+    if (simple_connection_set_socket_reuseaddr(u->s, reuse) == -1) {
+        udp_set_error(u, SIMPLE_CONNECTION_ERROR_SETSOCKOPT);
+        simple_connection_close_socket(u->s);
+        simple_connection_free_address(res);
+        free(u);
+        return NULL;
+    }
+
     memcpy(&u->my_addr, res->ai_addr, res->ai_addrlen);
     u->my_addrlen = res->ai_addrlen;
 
     simple_connection_free_address(res);
 #else
     if ((u->s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == -1) {
+        free(u);
+        return NULL;
+    }
+
+    int reuse = 1;
+    if (simple_connection_set_socket_reuseaddr(u->s, reuse) == -1) {
+        udp_set_error(u, SIMPLE_CONNECTION_ERROR_SETSOCKOPT);
+        closesocket(u->s);
         free(u);
         return NULL;
     }
@@ -243,6 +260,7 @@ int udp_read(udp_channel *u, void *buf, size_t len)
     if (u->mode == UDP_SERVER) {
         if ((r = recvfrom(u->s, buf, len, 0, (struct sockaddr*)u->inp_addr, &slen)) == -1) {
             udp_set_error(u, SIMPLE_CONNECTION_ERROR_RECVFROM);
+            return -1;
         }
         *u->out_addr = *u->inp_addr;
         u->out_addrlen = slen;

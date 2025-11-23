@@ -33,6 +33,7 @@
 #include "tcp.h"
 #include "getrandom.h"
 #include "base64.h"
+#include "sha1.h"
 #include "errors.h"
 #include "socket_utils.h"
 
@@ -576,18 +577,31 @@ static int get_http_header(tcp_channel *channel, char *head, int headLen)
 
 static char *copy_string(tcp_channel *u, char *dst, int dstSize, char *src, int srcSize)
 {
+    int copy_len;
+
+    if (!src || srcSize <= 0) {
+        if (dst && dstSize > 0) {
+            dst[0] = 0;
+        }
+        return dst;
+    }
+
     if (!dst) {
-        dstSize = srcSize;
-        dst = malloc(dstSize + 1);
+        dst = malloc(srcSize + 1);
         if (!dst) {
             tcp_set_error(u, SIMPLE_CONNECTION_ERROR_MALLOC);
             return NULL;
         }
+        copy_len = srcSize;
     } else {
-        dstSize = (srcSize > dstSize) ? dstSize : srcSize;
+        if (dstSize <= 0) {
+            return dst;
+        }
+        copy_len = (srcSize < dstSize - 1) ? srcSize : (dstSize - 1);
     }
-    memcpy(dst, src, dstSize);
-    dst[dstSize] = 0;
+
+    memcpy(dst, src, copy_len);
+    dst[copy_len] = 0;
     return dst;
 }
 
@@ -637,9 +651,7 @@ static int http_ws_method_server(tcp_channel *channel, char *request, size_t len
 {
     char req[HTTP_HEADER_MAX_SIZE];
     char field[HTTP_FIELD_MAX_SIZE];
-#ifdef ENABLE_SSL
-    unsigned char sha1buf[SHA_DIGEST_LENGTH];
-#endif
+    unsigned char sha1buf[SIMPLE_CONNECTION_SHA1_DIGEST_LENGTH];
 
     if (request) {
         *request = 0;
@@ -694,13 +706,13 @@ static int http_ws_method_server(tcp_channel *channel, char *request, size_t len
 
     strncat(field, WS_HANDSHAKE_UUID, sizeof(field) - 1);
 
-#ifdef ENABLE_SSL
-    SHA1((unsigned char *)field, strlen(field), sha1buf);
+    simple_connection_sha1((const unsigned char *)field, strlen(field), sha1buf);
 
     char *key_b64 = (char *)simple_connection_base64_encode((const unsigned char *)sha1buf, sizeof(sha1buf), NULL);
-#else
-    char *key_b64 = (char *)simple_connection_base64_encode((const unsigned char *)field, strlen(field), NULL);
-#endif
+    if (!key_b64) {
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_MALLOC);
+        return 0;
+    }
 
     snprintf(req, sizeof(req),
              "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
@@ -725,13 +737,23 @@ static int http_ws_method_client(tcp_channel *channel)
 {
     char key[WS_KEY_LEN];
     char req[HTTP_HEADER_MAX_SIZE];
+    char field[HTTP_FIELD_MAX_SIZE];
+    char accept_source[HTTP_FIELD_MAX_SIZE];
+    unsigned char sha1buf[SIMPLE_CONNECTION_SHA1_DIGEST_LENGTH];
+    char *key_b64 = NULL;
+    char *expected_accept = NULL;
+    int rc = 0;
 
     if (simple_connection_get_random(key, WS_KEY_LEN, 0) == -1) {
         tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_INVALID_MODE);
-        return 0;
+        goto cleanup;
     }
 
-    char *key_b64 = (char *)simple_connection_base64_encode((const unsigned char *)key, WS_KEY_LEN, NULL);
+    key_b64 = (char *)simple_connection_base64_encode((const unsigned char *)key, WS_KEY_LEN, NULL);
+    if (!key_b64) {
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_MALLOC);
+        goto cleanup;
+    }
 
     snprintf(req, sizeof(req),
              "GET %s HTTP/1.1\r\nHost: %s\r\nSec-WebSocket-Version: 13\r\n"
@@ -739,26 +761,73 @@ static int http_ws_method_client(tcp_channel *channel)
              "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Protocol: binary\r\n\r\n",
              channel->path ? channel->path : "/", channel->host, key_b64);
 
-    free(key_b64);
-
     if (tcp_write_internal(channel, req, strlen(req)) != strlen(req)) {
         tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_SEND);
-        return 0;
+        goto cleanup;
     }
 
     if (get_http_header(channel, req, sizeof(req)) <= 0) {
         tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR);
-        return 0;
+        goto cleanup;
     }
 
     static const char *reply = "HTTP/1.1 101 Switching Protocols";
 
     if (strncasecmp(req, reply, strlen(reply))) {
         tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_HANDSHAKE);
-        return 0;
+        goto cleanup;
     }
 
-    return 1;
+    if (!header_get_field(channel, req, "Upgrade", field, sizeof(field))) {
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR);
+        goto cleanup;
+    }
+    if (strcasecmp(field, "websocket")) {
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR);
+        goto cleanup;
+    }
+
+    if (!header_get_field(channel, req, "Connection", field, sizeof(field))) {
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR);
+        goto cleanup;
+    }
+    if (!strcasestr(field, "Upgrade")) {
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR);
+        goto cleanup;
+    }
+
+    if (!header_get_field(channel, req, "Sec-WebSocket-Accept", field, sizeof(field))) {
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR);
+        goto cleanup;
+    }
+
+    int accept_len = snprintf(accept_source, sizeof(accept_source), "%s%s", key_b64, WS_HANDSHAKE_UUID);
+    if (accept_len < 0 || (size_t)accept_len >= sizeof(accept_source)) {
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PROTOCOL_ERROR);
+        goto cleanup;
+    }
+    simple_connection_sha1((const unsigned char *)accept_source, (size_t)accept_len, sha1buf);
+    expected_accept = (char *)simple_connection_base64_encode((const unsigned char *)sha1buf, sizeof(sha1buf), NULL);
+    if (!expected_accept) {
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_MALLOC);
+        goto cleanup;
+    }
+
+    if (strcmp(field, expected_accept)) {
+        tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_HANDSHAKE);
+        goto cleanup;
+    }
+
+    rc = 1;
+
+cleanup:
+    if (expected_accept) {
+        free(expected_accept);
+    }
+    if (key_b64) {
+        free(key_b64);
+    }
+    return rc;
 }
 
 int tcp_connection_upgrade(tcp_channel *u, int connection_method, const char *path, char *request, size_t len)
@@ -792,10 +861,10 @@ int tcp_connection_upgrade(tcp_channel *u, int connection_method, const char *pa
     return 1;
 }
 
-static int send_ws_header(tcp_channel *channel, uint8_t opcode, int len)
+static int send_ws_header(tcp_channel *channel, uint8_t opcode, size_t len)
 {
-    int sz;
-    int blen = len;
+    size_t sz;
+    size_t blen = len;
     unsigned char *mask;
     ws_t *ws = channel->ws;
 
@@ -811,7 +880,12 @@ static int send_ws_header(tcp_channel *channel, uint8_t opcode, int len)
         mask = ws->header.u.s16.m16.c;
         sz = 4;
     } else {  // Length needs 64 bits
-        ws->header.u.s64.l64 = WS_HTON64(blen);
+        ws->header.b1 = 0x7f;
+        if (blen > UINT64_MAX) {
+            tcp_set_error(channel, SIMPLE_CONNECTION_ERROR_WS_PAYLOAD_TOO_LARGE);
+            return 0;
+        }
+        ws->header.u.s64.l64 = WS_HTON64((uint64_t)blen);
         mask = ws->header.u.s64.m64.c;
         sz = 10;
     }

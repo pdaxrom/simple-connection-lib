@@ -7,6 +7,7 @@ set(LIB_SOURCES
     errors.c
     platform.c
     socket_utils.c
+    sha1.c
 )
 
 set(LIB_HEADERS
@@ -17,6 +18,7 @@ set(LIB_HEADERS
     errors.h
     platform.h
     socket_utils.h
+    sha1.h
 )
 
 # Create the library
